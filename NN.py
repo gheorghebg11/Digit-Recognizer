@@ -41,7 +41,7 @@ else:
 os.mkdir(save_dir)
 load_model_dir = os.path.join(os.getcwd(), loaded_model_name)
 data_dir = os.path.join(os.getcwd(), 'data')
-external_pics_dir = os.path.join(os.getcwd(), 'pics')
+external_pics_dir = os.path.join(os.getcwd(), 'extra_pics')
 
 # Path
 load_model_path = os.path.join(load_model_dir, 'model.ckpt')
