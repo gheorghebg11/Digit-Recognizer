@@ -14,6 +14,7 @@ from PIL import Image
 import tensorflow as tf
 import numpy as np
 import pandas as pd
+from skimage import transform
 
 tf.reset_default_graph()
 np.set_printoptions(precision=2, suppress=True, threshold=np.nan)
@@ -23,6 +24,7 @@ np.set_printoptions(precision=2, suppress=True, threshold=np.nan)
 #####################################################
 ########## Some initialization, do NOT change
 nbr_classes = 10
+size_images = (28,28)
 fil_size_stride_pool = []
 nbr_neurons = []
 
@@ -53,66 +55,77 @@ filter_evolution_savepath = os.path.join(save_dir, 'filter_evolution.png')
 cross_ent_train_savepath = os.path.join(save_dir, 'cross_entropy_train.png')
 cross_ent_cv_savepath = os.path.join(save_dir, 'cross_entropy_cv.png')
 
-
 ########## Some Global var for Training/Testing
-use_tboard = False
-use_cv = True
+use_tboard = True
 
-save_model = False
-save_model_properties = True
-predict_test_set = False
+# Training Steps
+nbr_training_steps =  10000
+use_epochs_instead_of_it = True
+nbr_epochs = 100
+ask_for_more_training_epoch_min = 20 # only ask after xx epochs
+ask_for_more_training_epoch_freq = 5 # ask every xx epochs (after min number)
+
+# Prediction
 predict_from_external_pics = False
+nbr_random_copies_of_test_set = 1 # use data augmentation to multiply the test set, and take the average prediction
+
+# Save stuff
+save_model_at_end = True
+save_png_filters_layer_0_at_end = True
+save_png_filter_evolution_at_end = True
+ask_for_ensemble_at_end = False
+
+########## Visualization & Plot Stuff
+# Plot Yes/No
+plot_distrib = False # plot distribution of classes, as well as values of a random pixel
+plot_filters_layer_0 = True
+plot_filter_evolution = True
 plot_wrong_classifications_at_end_training = False # change that to the number of batches to do
 
-ask_for_more_training = True
-
-nbr_training_steps =  500
-use_epochs_instead_of_it = False
-nbr_epochs = 1
-
-########## Visualization
+# Plot Properties
 nbr_samples_to_visualize = 0
-plot_distrib = False # plot distribution of classes, as well as values of a random pixel
-
-########## Monitoring Learning & Plotting stuff
 size_plot_per_filter = 1.5
 nbr_filters_per_row = 10
-
-# plot accuracy
-freq_plot_acc = 5
-
-# plot cross-ent
-freq_plot_cross_ent = freq_plot_acc * 2
-
-# plot filters in layer 0
-plot_filters_layer_0 = True
 nbr_filters_layer_0 = None # None means that we look at all of them
-freq_plot_filters = freq_plot_acc * 10
-save_png_filters_layer_0_at_end = True
 
-# plot the evolution of one  filter
-plot_filter_evolution = True
-freq_plot_filter_evolution = freq_plot_acc * 10
-save_png_filter_evolution_at_end = True
+# Plot Frequencies
+freq_plot_acc = 20
+freq_plot_cross_ent = freq_plot_acc * 10
+freq_plot_filters = freq_plot_acc * 10 
+freq_plot_filter_evolution = freq_plot_acc * 10 
 
 ########## Some Variables for the Architecture
+# Data augmentation
+use_data_augmentation = False
+max_rotation_angle = 20
+max_scalling_factor = 1.2
+max_shift_pixels = 3
+
 # Initialization weights
-use_Xavier_init = True
+use_Xavier_init = False
+use_He_init = False # if both are true, He takes priority, if None use normal dist (mean=0,std=0.1)
+
+# Activation
+activation_choices = ['ReLU', 'LReLU', 'tanh', 'sigmoid']
+activ = 'ReLU'
+activ_lrelu_alpha = 0.01
+
+# Normalization
+use_input_mean = False
+use_input_std = False
+use_batch_normalization = False
 
 # Batch
 batch_size = 128 # in [16,32, 64, 128, 256]
 shuffle_dataset_every_epoch = True
 
-# Normalization
-use_input_normalization = False
-use_batch_normalization = True
-
-# Regularization
+# L2-Regularization
 use_L2reg_in_conv = False
-use_L2reg_in_full = True
-beta = 0.1 # reg variable [0.01, 0.1]
+use_L2reg_in_full = False
+beta = 0.05 # reg variable [0.01, 0.1]
 
-keep_prob_training = 0.7 #dropout variable, set to 1 to ignore dropout, only on FC-layers
+# Dropout
+keep_prob_training = 1.0 #dropout variable, set to 1 to ignore dropout, only on FC-layers
 
 # Optimizer
 choices_gd = ['SGD', 'Adam']
@@ -121,47 +134,43 @@ learning_rate = 0.1
 
 # The convolution layers (nbr of filters, filter size, (v_stride,h_stride), 2x2maxpool)
 fil_size_stride_pool.append([32, [3,3], [1,1], True])
+fil_size_stride_pool.append([64, [3,3], [1,1], True])
 
 # The full layers (nbr neurons)
+nbr_neurons.append(128)
 nbr_neurons.append(nbr_classes)
 
 # CV
-cv_set_fraction = 0.01
+use_cv = True
+use_data_augmentation_cv = False
+cv_set_fraction = 0.05
 is_cv_split_random = False
 batch_size_cv = batch_size # so that I don't have to divide the cross-ent by batch_size and not loose precision
-cv_eval_nbr_iterations = freq_plot_acc * 10
+cv_eval_nbr_iterations = freq_plot_acc * 5
 
 #####################################################
 ##### Step 2 - Process Data
 #####################################################
 # input x_data:pandas df
-def preprocess_training_data(x_data, standardize, nbr_samples_to_visualize = 0):
+def preprocess_training_data(x_data, nbr_samples_to_visualize = 0):
 
 	x_data = x_data / 255
 
-	if standardize:
+	if use_input_mean:
 		x_mean = np.mean(x_data, axis=0)
-		x_std = np.std(x_data, axis=0)
 		np.savetxt(os.path.join(save_dir, 'x_mean.txt'), x_mean, fmt = '%.8f')
-		np.savetxt(os.path.join(save_dir, 'x_std.txt'), x_std, fmt = '%.8f')
-
-		x_data = (x_data - x_mean) / (x_std + 0.01)
-		x_data.fillna(0 , inplace=True)
-
-		if nbr_samples_to_visualize!= 0:
-			_, ax = plt.subplots(1,2, figsize=(9,4))
-			ax[0].imshow(np.array(x_mean).reshape(28,28), cmap='gray')
-			ax[0].set_title('The mean image is:')
-			ax[1].imshow(np.array(x_std).reshape(28,28), cmap='gray')
-			ax[1].set_title('The std-dev image is')
-			plt.show()
-
-			for i in range(28*28):
-				if x_std[i] == 0 and x_mean[i] != 0:
-					print(f'The index {i} has std = 0 but mean != 0.')
+		x_data = x_data - x_mean
 	else:
 		x_mean = 0
+
+	if use_input_std:
+		x_std = np.std(x_data, axis=0)
+		np.savetxt(os.path.join(save_dir, 'x_std.txt'), x_std, fmt = '%.8f')
+		x_data = x_data / (x_std + 0.01)
+	else:
 		x_std = 1
+
+	x_data.fillna(0 , inplace=True)
 
 	return x_data, x_mean, x_std
 
@@ -172,33 +181,40 @@ def preprocess_cv_test_data(x_data, x_mean, x_std):
 	x_data.fillna(0 , inplace=True)
 	return x_data
 
-def invert_colors(x_data):
-
-	return x_data
-
 #####################################################
 ##### Step 3 - Visualize & Explore Data
 #####################################################
 # input x_data, y_labels:pandas df
-def visualize_samples(nbr_samples_to_visualize, x_data, y_labels, is_normalized):
+def visualize_samples(nbr_samples_to_visualize, x_data, y_labels):
 	print(f'Visualizing {nbr_samples_to_visualize} image(s) :')
 
 	for i in range(nbr_samples_to_visualize):
 		random_sample = random.randint(0,x_data.shape[0])
 
+		image = np.array(x_data.iloc[random_sample]).reshape(28,28)
+
+		if use_data_augmentation:
+			image = random_transform(image.reshape(1,28,28,1)).reshape(28,28)
+
 		fig, ax = plt.subplots(1,2, figsize=(15,4))
 
-		ax[0].plot(np.array(x_data.iloc[random_sample]).reshape(28*28))
+		ax[0].plot(image.reshape(28*28))
 		ax[0].set_title('784 x 1 pixels value')
-		ax[1].imshow(np.array(x_data.iloc[random_sample]).reshape(28,28), cmap='gray')
+		ax[1].imshow(image, cmap='gray')
 		ax[1].set_title('28 x 28 pixels')
 
 		plt.show()
 
-		if is_normalized:
-			print(f'Image {i+1} / {nbr_samples_to_visualize}: The data has be normalized before plotting. The true label is {y_labels.iloc[random_sample].idxmax()}')
+		if use_input_mean == True or use_input_std == True:
+			if use_data_augmentation:
+				print(f'Image {i+1} / {nbr_samples_to_visualize}: The data has be standardized before plotting. The data has been randomly rotated, scaled and shifted. The true label is {y_labels.iloc[random_sample].idxmax()}')
+			else:
+				print(f'Image {i+1} / {nbr_samples_to_visualize}: The data has be standardized before plotting. The true label is {y_labels.iloc[random_sample].idxmax()}')
 		else:
-			print(f'Image {i+1} / {nbr_samples_to_visualize}: The true label is {y_labels.iloc[random_sample].idxmax()}')
+			if use_data_augmentation:
+				print(f'Image {i+1} / {nbr_samples_to_visualize}: The data has been randomly rotated, scaled and shifted. The true label is {y_labels.iloc[random_sample].idxmax()}')
+			else:
+				print(f'Image {i+1} / {nbr_samples_to_visualize}: The true label is {y_labels.iloc[random_sample].idxmax()}')
 
 def plot_distribution_classes(y_labels, type_dataset):
 	print(f'Here is the distribution of the classes, for the {type_dataset} set')
@@ -233,11 +249,17 @@ def plot_distribution_per_pixel(x_data, pixel_coord, type_dataset, plot_all = Fa
 #####################################################
 ##### Step 4 - Some Preliminary functions for the NN
 #####################################################
-## Create variables
+
+############ Create variables
 def weight_variable(shape, use_reg, fan_in):
-	stddev = 0.1
-	if use_Xavier_init:
-		stddev = math.sqrt(2/fan_in)
+
+	if use_He_init:
+		stddev = math.sqrt(2.0 / fan_in)
+	elif use_Xavier_init:
+		stddev = 1.0 / fan_in
+	else:
+		stddev = 0.1
+
 	initial = tf.truncated_normal(shape, stddev = stddev, name='weight_init')
 
 	regularizer = None
@@ -251,7 +273,18 @@ def bias_variable(shape, init_value=0.1):
 	initial = tf.constant(init_value, shape = shape, name='bias_init')
 	return tf.get_variable(name = 'bias', initializer = initial, dtype=tf.float32)
 
-## NN layers
+############ NN layers
+def activation(input):
+	if activ == 'ReLU':
+		return tf.nn.relu(input, name='ReLU_activation')
+	elif activ == 'LReLU':
+		return tf.nn.leaky_relu(input, alpha = activ_lrelu_alpha, name='LReLU_activation')
+	elif activ == 'tanh':
+		return tf.nn.tanh(input, name='tanh_activation')
+	elif activ == 'sigmoid':
+		return tf.nn.sigmoid(input, name='sigmoid_activation')
+	return input
+
 def conv_layer(nbr_layer, input, nbr_filters, filter_size, stride, maxpool, use_batch_normalization):
 	name_layer = 'conv_layer_' + str(nbr_layer)
 	with tf.variable_scope(name_layer):
@@ -262,14 +295,15 @@ def conv_layer(nbr_layer, input, nbr_filters, filter_size, stride, maxpool, use_
 		total_param = np.prod(W.shape) + np.prod(b.shape)
 		print(f'Created convolutional layer {nbr_layer} with {nbr_filters} filters of size {filter_size}, and {total_param} parameters')
 
-		if use_batch_normalization:
-			input = tf.layers.batch_normalization(input, training = is_train, name='batch_norm_inconv')
 		input = tf.nn.conv2d(input, W, strides = [1,stride[0],stride[1],1], padding ='SAME', name='conv2d') + b
 		if maxpool:
 			input = tf.nn.max_pool(input, ksize=[1,2,2,1], strides=[1,2,2,1], padding='SAME', name='maxpool_inconv')
-		return tf.nn.relu(input)
+		input = activation(input)
+		if use_batch_normalization:
+			input = tf.layers.batch_normalization(input, training = is_train, name='batch_norm_inconv')
+		return input
 
-def full_layer(nbr_layer, input, nbr_output, use_batch_normalization, activation = True):
+def full_layer(nbr_layer, input, nbr_output, use_batch_normalization, activ = True):
 	name_layer = 'full_layer_' + str(nbr_layer)
 	with tf.variable_scope(name_layer):
 		fan_in = input.get_shape().as_list()[1]
@@ -279,27 +313,59 @@ def full_layer(nbr_layer, input, nbr_output, use_batch_normalization, activation
 		total_param = np.prod(W.shape) + np.prod(b.shape)
 		print(f'Created fully-connec layer {nbr_layer} with {nbr_output} neurons, and {total_param} parameters')
 
+		input = tf.matmul(input,W) + b
+		if keep_prob != 1.0:
+			input = tf.nn.dropout(input, keep_prob = keep_prob)
+		if activ:
+			input = activation(input)
 		if use_batch_normalization:
 			input = tf.layers.batch_normalization(input, training = is_train)
-		if activation:
-			return tf.nn.relu(tf.nn.dropout(tf.matmul(input,W) + b, keep_prob = keep_prob))
-		else:
-			return tf.nn.dropout(tf.matmul(input,W) + b, keep_prob = keep_prob)
 
-## Create batch
-def extract_batch(x_data, y_data, batch_nbr, batch_size):
+		return input
+
+############ Create batch
+def random_transform(x_data):
+
+	for i in range(x_data.shape[0]):
+		angle = random.uniform(-max_rotation_angle, max_rotation_angle)
+		scaling_factor = random.uniform(1.0 / max_scalling_factor, max_scalling_factor)
+		shift_v = random.randint(-max_shift_pixels, max_shift_pixels)
+		shift_h = random.randint(-max_shift_pixels, max_shift_pixels)
+
+		# rescale
+		rescaled_im = transform.rescale(x_data[i], scaling_factor, anti_aliasing=True, multichannel =False, mode='constant')
+		diff_to_28 = rescaled_im.shape[0] - 28
+		if diff_to_28 < 0:
+			x_data[i] = np.pad(rescaled_im, pad_width=[[-math.ceil(diff_to_28/2),-math.floor(diff_to_28/2)], [-math.ceil(diff_to_28/2),-math.floor(diff_to_28/2)], [0,0]], mode='edge')
+		elif diff_to_28 > 0:
+			x_data[i] = rescaled_im[math.ceil(diff_to_28/2) : 28 + math.ceil(diff_to_28/2), math.ceil(diff_to_28/2) : 28 + math.ceil(diff_to_28/2),:]
+
+		# rotate
+		x_data[i] = transform.rotate(x_data[i], angle)
+
+		# shift
+		x_data[i] = np.pad(x_data[i], pad_width=[[max_shift_pixels,max_shift_pixels], [max_shift_pixels,max_shift_pixels], [0,0]], mode='edge')[max_shift_pixels+shift_v : 28+max_shift_pixels+shift_v, max_shift_pixels+shift_h : 28+max_shift_pixels+shift_h,:]
+
+	return x_data
+
+def extract_batch(x_data, y_data, batch_nbr, batch_size, use_transform=False):
 	nbr_training_ex = x_data.shape[0]
 	batch_start = batch_nbr * batch_size % nbr_training_ex
 	batch_end = (batch_nbr + 1) * batch_size % nbr_training_ex
 
 	if batch_start < batch_end:
-		return [np.array(x_data[batch_start:batch_end]).reshape(batch_size, 28,28,1), y_data[batch_start:batch_end]]
+		output = [np.array(x_data[batch_start:batch_end]).reshape(batch_size, 28,28,1), y_data[batch_start:batch_end]]
 	else:
 		#print(f'Beginining of a new epoch, batch_end is {batch_end}, hopefully creating the batches is done right...')
 		if batch_end == 0:
-			return [np.array(x_data[batch_start:]).reshape(batch_size, 28,28,1), y_data[batch_start:]]
+			output = [np.array(x_data[batch_start:]).reshape(batch_size, 28,28,1), y_data[batch_start:]]
 		else:
-			return [np.vstack([x_data[batch_start:], x_data[:batch_end]]).reshape(batch_size, 28,28,1), pd.concat([y_data.iloc[batch_start:], y_data.iloc[:batch_end]], ignore_index = True) ]
+			output = [np.vstack([x_data[batch_start:], x_data[:batch_end]]).reshape(batch_size, 28,28,1), pd.concat([y_data.iloc[batch_start:], y_data.iloc[:batch_end]], ignore_index = True) ]
+
+	if use_transform:
+		return random_transform(output[0]), output[1]
+	else:
+		return output
 
 def shuffle_dataset(x_data, y_label, random_seed = np.random.randint(100000)):
 	return [x_data.sample(frac=1.0, random_state=random_seed), y_label.sample(frac=1.0, random_state=random_seed)]
@@ -324,14 +390,99 @@ def extract_batch_test(x_data, batch_nbr, batch_size):
 	batch_end = (batch_nbr + 1) * batch_size % nbr_test_ex
 
 	if batch_start < batch_end:
-		return np.array(x_data[batch_start:batch_end]).reshape(batch_size, 28,28,1)
+		output =  np.array(x_data[batch_start:batch_end]).reshape(batch_size, 28,28,1)
 	else:
 		if batch_end == 0:
-			return np.array(x_data[batch_start:]).reshape(batch_size, 28,28,1)
+			output =  np.array(x_data[batch_start:]).reshape(batch_size, 28,28,1)
 		else:
-			return np.vstack([x_data[batch_start:], x_data[:batch_end]]).reshape(batch_size, 28,28,1)
+			output = np.vstack([x_data[batch_start:], x_data[:batch_end]]).reshape(batch_size, 28,28,1)
 
-# Plotting some filters from the CNN
+	if nbr_random_copies_of_test_set > 1:
+		return random_transform(output)
+	else:
+		return output
+
+
+############ Predictions
+def predict_on_test_set():
+
+	print('\nTesting begins.')
+	if nbr_random_copies_of_test_set > 1:
+		print(f'We randomly transform the test set {nbr_random_copies_of_test_set} times and take the average prediction.')
+
+	x_csv_test = pd.read_csv(os.path.join(data_dir,'test.csv'))
+	x_test = preprocess_cv_test_data(x_csv_test, x_mean, x_std)
+	y_submission = pd.read_csv(os.path.join(data_dir,'sample_submission.csv'))
+
+	nbr_test_ex = x_test.shape[0]
+	batch_size_test = 100 # doesn't really matter, just a matter of balance for being able to print partial resutls
+
+	if nbr_test_ex % batch_size_test:
+		print('The size of the batch for the test set is not a divisor of the whole set, fix that to avoid issues at the end of the set')
+
+	# Do the prediction
+	for k in range(nbr_random_copies_of_test_set):
+		print(f'Starting prediction {k+1} / {nbr_random_copies_of_test_set}')
+		y_submission[f'Label{k+1}'] = np.nan
+		for i in range(nbr_test_ex // batch_size_test):
+			print_prediction_class_test = sess.run(prediction_class, feed_dict={X:extract_batch_test(x_test, i, batch_size_test), keep_prob:1.0, is_train:False})
+			if (i+1) % 20 == 0:
+				print(f'Finishing test batch {i+1} / {nbr_test_ex // batch_size_test}')
+
+			for idx,value in enumerate(print_prediction_class_test):
+				y_submission[f'Label{k+1}'].at[i*batch_size_test + idx] = value
+			
+
+	if nbr_random_copies_of_test_set > 1:
+		print('Merging now the answers and taking the average')
+		nbr_images_overten = nbr_test_ex // 10
+		for idx, row in y_submission.iterrows():
+			#y_submission.iloc[idx]['Label'] = row.drop(['ImageId']).value_counts().index[0]
+			y_submission['Label'].at[idx] = row.drop(['ImageId']).value_counts().index[0]
+			if (idx + 1) % nbr_images_overten == 0:
+				print(f'{(idx + 1) // nbr_images_overten:2.0f} / 10 of the job done')
+		y_submission.to_csv(os.path.join(save_dir,f'submission_all_epoch{int(epoch)}.csv'), index=False)
+	else:
+		y_submission.drop(columns = 'Label', inplace = True)
+		y_submission.rename(columns={'Label1': 'Label'}, inplace=True)
+		
+	# Save the prediction
+	y_submission[['ImageId', 'Label']].to_csv(os.path.join(save_dir,f'submission_epoch{int(epoch)}.csv'), index=False)
+	print('Testing Done and saved')
+
+
+def make_ensemble():
+	y_submission = pd.read_csv(os.path.join(data_dir,'sample_submission.csv'))
+	nbr_images = len(y_submission.index)
+	nbr_submissions = 0	
+	
+	for filename in os.listdir(save_dir):
+		if filename[:16] == 'submission_epoch':
+			nbr_submissions = nbr_submissions + 1
+			nbr_epoch = int(filename[16:-4])
+			
+			submission = pd.read_csv(os.path.join(save_dir, filename))['Label'].rename(columns={'Label': f'Label{nbr_epoch}'})
+			y_submission = pd.concat([y_submission, submission], axis = 1).rename(columns={0:f'Label{nbr_epoch}'})
+	
+	if nbr_submissions > 0:
+		print(f'Averaging the predictions out of {nbr_submissions} predicitions')
+		
+		# Pick the most common value
+		nbr_images_overten = nbr_images // 10
+		for idx, row in y_submission.iterrows():
+			y_submission.loc[idx, 'Label'] = row.drop(['ImageId']).value_counts().index[0]
+			if (idx + 1) % nbr_images_overten == 0:
+				print(f'{(idx + 1) // nbr_images_overten:2.0f} / 10 of the job done')
+		
+		# Save the prediction
+		y_submission[['ImageId', 'Label']].to_csv(os.path.join(save_dir,f'submission.csv'), index=False)
+		y_submission.to_csv(os.path.join(save_dir,f'submission_all.csv'), index=False)
+		print(f'\nEnsemble made')
+	else:
+		print(f'\nNo submission found in {save_dir}')
+
+
+############ Plotting some filters from the CNN
 def plot_filters(iteration_step, nbr_conv_layer=0, nbr_filters=None, save = False):
 
 	if nbr_conv_layer >= len(fil_size_stride_pool):
@@ -366,8 +517,6 @@ def plot_filters(iteration_step, nbr_conv_layer=0, nbr_filters=None, save = Fals
 		else:
 			plt.show()
 
-
-# Plotting the evolution of a filtera from the CNN
 def plot_filter_evolution(iteration_step, filter_layer=0, filter_nbr=0, save = False):
 
 	weights = sess.run('conv_layers/conv_layer_' + str(filter_layer) +'/weights:0')
@@ -388,10 +537,156 @@ def plot_filter_evolution(iteration_step, filter_layer=0, filter_nbr=0, save = F
 	if save and len(filter_history) != 0:
 		plt.savefig(fname = filter_evolution_savepath)
 		plt.close() # close it so it doesn't print at the end
-		print(f'\nSaved the evolution of filter {filter_nbr} in layer {filter_layer} over {len(filter_history)} periods of time ({iteration_step} iterations each)')
+		print(f'\nSaved the evolution of filter {filter_nbr} in layer {filter_layer} over {len(filter_history)} periods of time ({int(iteration_step / len(filter_history))} iterations each)')
 	else:
 		plt.show()
 
+def plot_cross_ent_and_acc(cross_ent, acc, it, dataset_type='Training', savepath = None):
+
+# =============================================================================
+# 	plt.figure(figsize=(15,4))
+# 	plt.plot(cross_ent, label = dataset_type + ' cross-ent')
+# 	plt.legend(loc ='upper right')
+# 	plt.title(f'{dataset_type} cross-entropy after {it+1} iterations (epoch {epoch:2.2f}) of training')
+# 	if cross_ent_history_train[0] > cross_ent_history_train[-1]*10:
+# 		plt.yscale('log')
+# 	plt.show()
+# =============================================================================
+	
+	fig, ax1 = plt.subplots(figsize=(12,4))
+	ax1.set_xlabel(f'number of epochs')
+	x_axis = np.arange(epoch/len(acc), epoch+ epoch/len(acc), epoch/len(acc))
+
+	if len(x_axis) != len(acc): # this could be due to rounding errors
+		x_axis = x_axis[:-1]
+	
+	color = 'tab:red'
+	ax1.set_ylabel(dataset_type + ' cross-ent', color=color)
+	ax1.plot(x_axis, cross_ent, color=color)
+	ax1.tick_params(axis='y', labelcolor=color)
+	if cross_ent_history_train[0] > cross_ent_history_train[-1]*5:
+		ax1.set_yscale('log')
+	
+	ax2 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
+	color = 'tab:blue'
+	ax2.set_ylabel(dataset_type + ' accuracy', color=color)  # we already handled the x-label with ax1
+	ax2.plot(x_axis, acc, color=color)
+	ax2.tick_params(axis='y', labelcolor=color)
+	plt.ylim(bottom=0.85, top = 1.01)
+	
+	fig.tight_layout()  # otherwise the right y-label is slightly clipped
+	plt.title(f'{dataset_type} cross-entropy and accuracy after {it+1} iterations (epoch {epoch:2.2f}) of training')
+	plt.show()
+	
+	if savepath != None:
+		plt.savefig(fname = savepath)
+		print(f'\nSaved graph for the {dataset_type} cross-entropy')
+
+	plt.close() # close it so it doesn't print at the end
+
+
+############ Saving Stuff
+def save_model_details():
+	with open(filename_save_model_archi, 'w') as notepad_file:
+		notepad_file.write(f'Model from {datetime.now()}, trained for ({epoch:2.1f} epochs).')
+		if use_data_augmentation:
+			notepad_file.write(f'\n\nWe used data augmentation with')
+			notepad_file.write(f'\n - a rotation given by a random angle between {-max_rotation_angle} and {max_rotation_angle}')
+			notepad_file.write(f'\n - a rescaling given by a random factor between {1/ max_scalling_factor:1.2f} and {max_scalling_factor:1.2f}')
+			notepad_file.write(f'\n - a (vertical and horizontal) shift given by a random number of pixels up to {max_shift_pixels} units')
+		if use_input_mean:
+			notepad_file.write(f'\nWe used data standardization by removing the mean (centering)')
+		if use_input_std:
+			notepad_file.write(f'and diving by the standard deviation')
+		notepad_file.write(f'\n\nThe weights were initialized ')
+		if use_He_init:
+			notepad_file.write(f'using He initialization.')
+		elif use_Xavier_init:
+			notepad_file.write(f'using Xavier initialization.')
+		else:
+			notepad_file.write(f'with a normal distribution of mean=0 and stddev=0.1.')
+		notepad_file.write(f'\n\nTraining: \n batches of {batch_size} images')
+		if shuffle_dataset_every_epoch:
+			notepad_file.write(f' with shuffle every epoch')
+		notepad_file.write(f'\n {nbr_training_steps} iterations with the {optimizer_gd} optimizer')
+		if optimizer_gd == 'SGD':
+			notepad_file.write(f' (learning rate {learning_rate})')
+		notepad_file.write(f'\n\nArchitecture: {len(fil_size_stride_pool)} conv layers followed by {len(nbr_neurons)} fully connected layers, all layers have {activ} activation')
+		if activ == 'LReLU':
+			notepad_file.write(f' with alpha = {activ_lrelu_alpha}')
+		if use_batch_normalization:
+			notepad_file.write(f' and use batch normalization.')
+		notepad_file.write('\nMore precisely and in this order the hidden layers are:')
+		for j in range(len(fil_size_stride_pool)):
+			notepad_file.write(f'\n - conv layer {j+1} with {fil_size_stride_pool[j][0]} filters of size {fil_size_stride_pool[j][1]} with stride {fil_size_stride_pool[j][2]}')
+			if fil_size_stride_pool[j][3]:
+				notepad_file.write(f', 2x2 Maxpool')
+			if use_L2reg_in_conv:
+				notepad_file.write(f', L2 reg with coeff {beta}')
+		for j in range(len(nbr_neurons)):
+			notepad_file.write(f'\n - fully connected layer {j+1} with {nbr_neurons[j]} neurons')
+			if keep_prob_training != 1.0:
+				notepad_file.write(f', dropout with rate {keep_prob_training}')
+			if use_L2reg_in_conv:
+				notepad_file.write(f', L2 reg with coeff {beta}')
+		notepad_file.write(f'\n\nLast Cross-entropy: {print_cross_entropy:2.5f} and Last Accuracy {print_nbr_correct_pred} / {batch_size}.')
+		if save_model_at_end:
+			model_filepath = os.path.join(save_dir, 'model.ckpt.data-00000-of-00001')
+			notepad_file.write(f'\n\nThe size of this model is : {os.path.getsize(model_filepath) >> 20} Mb.')
+		notepad_file.write('\n\nSUBMIT SCORE: ')
+
+############ Other
+def ask_for_more_training(epoch):
+	
+	if epoch >= ask_for_more_training_epoch_min:
+		if ask_for_more_training_epoch_freq == 0:
+			return False
+		elif (int(epoch) - ask_for_more_training_epoch_min) % ask_for_more_training_epoch_freq == 0:
+			
+			print('\nHere is the summary so far:')
+			plot_filters(i+1, nbr_filters=nbr_filters_layer_0)
+			plot_filter_evolution(i+1)
+			plot_cross_ent_and_acc(cross_ent_history_train, accuracy_history_train, i)
+			plot_cross_ent_and_acc(cross_ent_history_cv, accuracy_history_cv, i, dataset_type='CV')
+			
+			while "the answer is invalid":
+				print('What now ?')
+				print(' - KEEP training (k)')
+				print(' - PREDICT test set, then KEEP training (p)')
+				print(' - PREDICT test set, SAVE the model, then KEEP training (a)')
+				print(' - PREDICT test set, SAVE the model, then STOP training (s)')
+				print(' - STOP training (q)')
+				reply = str(input('Enter your answer: ')).lower().strip()
+				if reply[:1] == 'k':
+					print('Training Resumed.\n')
+					return True
+				elif reply[:1] == 'p':
+					predict_on_test_set()
+					print('Training Resumed.\n')
+					return True
+				elif reply[:1] == 'a':
+					model_name = f'model_epoch_{int(epoch)}.ckpt'
+					saver.save(sess, os.path.join(save_dir, model_name))
+					print(f'\nModel saved with name {model_name}')
+					predict_on_test_set()
+					print('Training Resumed.\n')
+					return True
+				elif reply[:1] == 's':
+					model_name = f'model_epoch_{int(epoch)}.ckpt'
+					saver.save(sess, os.path.join(save_dir, model_name))
+					print(f'\nModel saved with name {model_name}')
+					predict_on_test_set()
+					print('Training Finished.\n')
+					return False
+				elif reply[:1] == 'q':
+					print('Training Finished.\n')
+					return False
+				else:
+					print('Entry not valid. Try again, it\'s not that hard... :)')
+	else:
+		return True
+	
+	
 
 #####################################################
 ##### Step 5 - The NN - Architecture, Error Loss, Reg, Opti, Training, etc
@@ -419,7 +714,7 @@ with tf.variable_scope('full_layers'):
 	nbr_hidden_layers = len(nbr_neurons)
 	for i in range(nbr_hidden_layers - 1):
 		full.append(full_layer(i, full[i], nbr_neurons[i], use_batch_normalization))
-	full_last = full_layer(nbr_hidden_layers - 1, full[nbr_hidden_layers-1], nbr_neurons[nbr_hidden_layers -1], use_batch_normalization, activation = False)
+	full_last = full_layer(nbr_hidden_layers - 1, full[nbr_hidden_layers-1], nbr_neurons[nbr_hidden_layers -1], use_batch_normalization, activ = False)
 
 with tf.name_scope('regularization'):
 	reg_term = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
@@ -464,11 +759,11 @@ if load_model == False:
 	x_train = x_csv.drop('label', axis=1)
 	print('Data loaded')
 
-	# Preprocesing the data
+	# Preprocesing the data + split CV
 	if use_cv:
 		x_train, y_train, x_cv, y_cv = split_train_test(x_train, y_train, is_cv_split_random, cv_set_fraction)
 
-	x_train, x_mean, x_std = preprocess_training_data(x_train, use_input_normalization, nbr_samples_to_visualize)
+	x_train, x_mean, x_std = preprocess_training_data(x_train, nbr_samples_to_visualize)
 	nbr_training_ex = x_train.shape[0]
 
 	if use_cv:
@@ -477,7 +772,7 @@ if load_model == False:
 
 	# Visualization
 	if nbr_samples_to_visualize!= 0:
-		visualize_samples(nbr_samples_to_visualize, x_train, y_train, use_input_normalization)
+		visualize_samples(nbr_samples_to_visualize, x_train, y_train)
 
 	if plot_distrib:
 		plot_distribution_classes(y_train, 'train')
@@ -487,29 +782,29 @@ if load_model == False:
 elif load_model == True:
 
 	# Load x_mean and x_std
-	if use_input_normalization:
+	x_mean = 0
+	x_std = 1
+	if use_input_mean:
 		x_mean = np.loadtxt(fname = os.path.join(load_model_dir, 'x_mean.txt'), dtype=np.float32)
+	if use_input_std:
 		x_std = np.loadtxt(fname = os.path.join(load_model_dir, 'x_std.txt'), dtype=np.float32)
-	else:
-		x_mean = 0
-		x_std = 1
+
 
 ### Running the Session
 with tf.Session() as sess:
 
-	# PREDICTING FROM OUTSIDE IMAGES
+	# LOADING A MODEL
 	if load_model == True:
 		print('\n------------------------------------------------\n')
 		saver.restore(sess, load_model_path)
 		print(f'\nSystem loaded from {load_model_path}\n')
 
+		# Predict from outside pic
 		if predict_from_external_pics:
 			x_data = []
 
 			for filename in os.listdir(external_pics_dir):
 				if filename[-3:] in ['png', 'bmp', 'jpg']:
-					#img = plt.imread(os.path.join(external_pics_dir,filename))
-					#x_data.append(transform.resize(img, output_shape = [28, 28],  anti_aliasing=True, mode='reflect'))
 					img = Image.open(os.path.join(external_pics_dir,filename)).convert("L").resize((28,28))
 					x_data.append(np.asarray(img))
 
@@ -528,31 +823,12 @@ with tf.Session() as sess:
 				plt.show()
 				print(f'The system predicted the number {print_prediction_class[i]}')
 
-		if predict_test_set:
-			print('\nTesting begins')
-			x_csv_test = pd.read_csv(os.path.join(data_dir,'test.csv'))
-			x_test = preprocess_cv_test_data(x_csv_test, x_mean, x_std)
-			y_submission = pd.read_csv(os.path.join(data_dir,'sample_submission.csv'))
+		# Predict test set
+		predict_on_test_set()
 
-			nbr_test_ex = x_test.shape[0]
-			batch_size_test = 100 # doesn't really matter, just a matter of balance for being able to print partial resutls
-			if nbr_test_ex % batch_size_test:
-				print('The size of the batch for the test set is not a divisor of the whole set, fix that to avoid issues at the end of the set')
-
-			# Do the prediction
-			for i in range(nbr_test_ex // batch_size_test):
-				print_prediction_class_test = sess.run(prediction_class, feed_dict={X:extract_batch_test(x_test, i, batch_size_test), keep_prob:1.0, is_train:False})
-				if (i+1) % 20 == 0:
-					print(f'Finishing test batch {i+1} / {nbr_test_ex / batch_size_test}')
-
-				for idx,value in enumerate(print_prediction_class_test):
-					y_submission['Label'].at[i*batch_size_test + idx] = value
-
-			# Save the prediction
-			y_submission.to_csv(os.path.join(save_dir,'submission_' +  datetime_now + '.csv'), index=False)
-
+	# STARTING NEW MODEL
 	elif load_model == False:
-		# LOADING
+		# LOADING data
 		print('\nTensorFlow session running...')
 		sess.run(tf.global_variables_initializer())
 		print('Global var loaded')
@@ -565,28 +841,18 @@ with tf.Session() as sess:
 		# SOME GLOBAL VAR FOR PLOTTING
 		filter_history = []
 		cross_ent_history_train = []
+		accuracy_history_train = []
 		cross_ent_history_cv = []
-		keep_training = True
-
+		accuracy_history_cv = []
+		
 		# TRAINING
 		for i in range(nbr_training_steps):
 			epoch = i*batch_size / nbr_training_ex
 
-			# If we arrive at the end of an epoch: Shuffle + ask for more ?
+			# If we arrive at the end of an epoch: Shuffle + ask for more
 			if (i*batch_size % nbr_training_ex) < batch_size and shuffle_dataset_every_epoch:
 				# Ask for more training
-				if ask_for_more_training and i > 0:
-					while "the answer is invalid":
-						reply = str(input('Continue Training ?' + ' (y/n): ')).lower().strip()
-						if reply[:1] == 'n':
-							keep_training = False
-							break
-						elif reply[:1] == 'y':
-							print('Training Resumed.\n')
-							break
-						else:
-							print('Entry not valid. ')
-				if keep_training == False:
+				if ask_for_more_training(epoch) == False:
 					break
 
 				# Shuffle
@@ -594,35 +860,29 @@ with tf.Session() as sess:
 				print(f'\nBeginning of epoch {int(epoch)}, data set shuffled')
 
 			# Training
-			_, summary, print_cross_entropy, print_nbr_correct_pred = sess.run([train_step, merged, cross_entropy, nbr_correct_predictions], feed_dict={(X,Y):extract_batch(x_train, y_train, i, batch_size), keep_prob:keep_prob_training, is_train:True})
+			_, summary, print_cross_entropy, print_nbr_correct_pred = sess.run([train_step, merged, cross_entropy, nbr_correct_predictions], feed_dict={(X,Y):extract_batch(x_train, y_train, i, batch_size, use_data_augmentation), keep_prob:keep_prob_training, is_train:True})
 			if (i+1) % freq_plot_acc == 0:
 				print(f'Epoch {epoch:2.2f} ({i+1}th step) with accuracy {print_nbr_correct_pred} / {batch_size} and cross-ent {print_cross_entropy:5.8f}')
 				cross_ent_history_train.append(print_cross_entropy)
+				accuracy_history_train.append(print_nbr_correct_pred / batch_size)
 			if use_tboard:
 				train_writer.add_summary(summary, i)
 
-			if (i+1) % freq_plot_cross_ent == 0:
-				plt.figure(figsize=(15,4))
-				#plt.ylim(0,0.7)
-				plt.plot(cross_ent_history_train, label = 'cross-ent training')
-				plt.legend(loc ='upper right')
-				plt.title(f'cross-entropy  after {i+1} iterations (epoch {epoch}) of training')
-				if cross_ent_history_train[0] > cross_ent_history_train[-1]*5:
-					plt.yscale('log')
-				plt.show()
-
-
 			# Plotting Filters from a layer
-			if (i+1) % freq_plot_filters == 0 and plot_filters_layer_0:
+			if freq_plot_filters != None and (i+1) % freq_plot_filters == 0 and plot_filters_layer_0:
 				plot_filters(i+1, nbr_filters=nbr_filters_layer_0)
 
 			# Plotting the evolution of a Filter
-			if (i+1) % freq_plot_filter_evolution == 0 and plot_filter_evolution:
+			if freq_plot_filter_evolution != None and (i+1) % freq_plot_filter_evolution == 0 and plot_filter_evolution:
 				plot_filter_evolution(i+1)
+			
+			# Plotting Train cross-ent
+			if (i+1) % freq_plot_cross_ent == 0:
+				plot_cross_ent_and_acc(cross_ent_history_train, accuracy_history_train, i)
 
 			# CV
 			if use_cv and (i+1) % cv_eval_nbr_iterations == 0:
-				print(f'\nPerforming CV after {i+1} iterations, with {nbr_cv_ex} examples (batches of {batch_size_cv})')
+				print(f'\nPerforming CV after {i+1} iterations, with {nbr_cv_ex // batch_size_cv} batches of {batch_size_cv} examples ({int(cv_set_fraction*100)}% of the whole set)')
 				print_cv_nbr_correct_pred_total = 0
 				print_cv_cross_entropy_total = 0
 				freq_print_cv_info = 10
@@ -631,7 +891,7 @@ with tf.Session() as sess:
 					print(f'The cv_batch_size does not divide the number of cv_examples, the remainder ones will be ignored')
 
 				for j in range(nbr_cv_ex // batch_size_cv):
-					print_cv_cross_entropy, print_cv_nbr_correct_pred = sess.run([cross_entropy, nbr_correct_predictions], feed_dict={(X,Y):extract_batch(x_cv, y_cv, j, batch_size_cv), keep_prob:1.0, is_train:False})
+					print_cv_cross_entropy, print_cv_nbr_correct_pred = sess.run([cross_entropy, nbr_correct_predictions], feed_dict={(X,Y):extract_batch(x_cv, y_cv, j, batch_size_cv, use_data_augmentation_cv), keep_prob:1.0, is_train:False})
 
 					print_cv_cross_entropy_total += print_cv_cross_entropy
 					print_cv_nbr_correct_pred_total += print_cv_nbr_correct_pred
@@ -640,15 +900,12 @@ with tf.Session() as sess:
 						print(f'Finishing cv batch {j+1} / {nbr_cv_ex // batch_size_cv} with accuracy {print_cv_nbr_correct_pred} / {batch_size_cv} and average cross-ent {print_cv_cross_entropy_total / (j+1):5.8f}')
 
 				cross_ent_history_cv.append(print_cv_cross_entropy_total/ (nbr_cv_ex // batch_size_cv))
+				accuracy_history_cv.append(print_cv_nbr_correct_pred_total / nbr_cv_ex)
 				print(f'CV accuracy avg {print_cv_nbr_correct_pred_total} / {nbr_cv_ex} = {print_cv_nbr_correct_pred_total / nbr_cv_ex:0.4f} and cross-ent avg {cross_ent_history_cv[-1]:5.8f}\n')
-				plt.figure(figsize=(15,4))
-				plt.plot(cross_ent_history_cv, label = 'cross-ent CV')
-				plt.legend(loc ='upper right')
-				if cross_ent_history_cv[0] > cross_ent_history_cv[-1]*5:
-					plt.yscale('log')
-				plt.title(f'cross-entropy for CV set after {i+1} iterations (epoch {epoch}) of training')
-				plt.show()
 
+				plot_cross_ent_and_acc(cross_ent_history_cv, accuracy_history_cv, i, dataset_type='CV')
+
+			
 
 		# END OF TRAINING
 		print(f'\n--------------------------------------------------------\nTraining finished after {epoch:2.2f} epochs and {nbr_training_steps} training steps.\n--------------------------------------------------------')
@@ -657,31 +914,14 @@ with tf.Session() as sess:
 
 		# SAVE FILTERS & Cross-Entropy
 		# Training Cross-Entropy
-		plt.figure(figsize=(15,4))
-		plt.plot(cross_ent_history_train, label = 'cross-ent training')
-		plt.legend(loc ='upper right')
-		plt.title(f'cross-entropy  after {nbr_training_steps} iterations (epoch {epoch}) of training')
-		if cross_ent_history_train[0] > cross_ent_history_train[-1]*5:
-			plt.yscale('log')
-		plt.savefig(fname = cross_ent_train_savepath)
-		plt.close() # close it so it doesn't print at the end
-		print(f'\nSaved graph for the training cross-entropy')
+		plot_cross_ent_and_acc(cross_ent_history_train, accuracy_history_train, nbr_training_steps, savepath = cross_ent_train_savepath)
 
 		# CV Cross-Entropy
-		plt.figure(figsize=(15,4))
-		plt.plot(cross_ent_history_cv, label = 'cross-ent CV')
-		plt.legend(loc ='upper right')
-		plt.title(f'cross-entropy after {nbr_training_steps} iterations (epoch {epoch}) of training')
-		if cross_ent_history_cv[0] > cross_ent_history_cv[-1]*5:
-			plt.yscale('log')
-		plt.savefig(fname = cross_ent_cv_savepath)
-		plt.close() # close it so it doesn't print at the end
-		print(f'\nSaved graph for the CV cross-entropy')
+		plot_cross_ent_and_acc(cross_ent_history_cv, accuracy_history_cv, nbr_training_steps, dataset_type='CV', savepath = cross_ent_cv_savepath)
 
 		# Filters
 		if save_png_filters_layer_0_at_end:
 			plot_filters(i+1, nbr_filters=nbr_filters_layer_0, save = True)
-
 		if save_png_filter_evolution_at_end:
 			plot_filter_evolution(i+1, save = True)
 
@@ -690,14 +930,11 @@ with tf.Session() as sess:
 		if plot_wrong_classifications_at_end_training:
 			print_prediction_class = sess.run(prediction_class, feed_dict={X:extract_batch(x_train, y_train, nbr_training_steps, batch_size)[0], keep_prob:1.0, is_train:False})
 			correct_labels = extract_batch( x_train, y_train, nbr_training_steps, batch_size)[1].idxmax(axis =1)
-
 			predictions_match = (print_prediction_class == correct_labels)
-
 			wrong_predictions = [correct_labels.index[idx] for idx, pred in enumerate(predictions_match) if pred == False]
 			nbr_wrong_pred = len(wrong_predictions)
 
 			print(f'\nHere are the {nbr_wrong_pred} wrong predictions out of {batch_size} after training through {batch_size*nbr_training_steps} images, {batch_size*nbr_training_steps / x_train.shape[0]:2.2f} epochs')
-
 			if nbr_wrong_pred != 0:
 				for i in range(nbr_wrong_pred):
 					plt.imshow(np.array(x_train.iloc[wrong_predictions[i]]).reshape(28,28), cmap='gray')
@@ -705,58 +942,36 @@ with tf.Session() as sess:
 					plt.show()
 
 		# SAVE THE MODEL
-		if save_model:
+		if save_model_at_end:
 			save_path = saver.save(sess, filename_save_path)
 			print('\nModel saved')
 
 		# SAVE PROPERTIES OF THE MODEL
-		if save_model_properties:
-			with open(filename_save_model_archi, 'w') as notepad_file:
-				notepad_file.write(f'Model from {datetime.now()}, trained on {i*batch_size} examples for {nbr_training_steps} iterations ({epoch} epochs).')
-				notepad_file.write(f'\n\nThe weights were initialized using Xavie initialization : {use_Xavier_init}.')
-				notepad_file.write(f'\n\nTraining: \n {nbr_training_steps} iterations with {optimizer_gd} (rate if SGD {learning_rate}) \
-						\n batches of {batch_size} images with shuffle every epoch : {shuffle_dataset_every_epoch} \
-						\n images standardized : {use_input_normalization} \
-						\n use batch normalization : {use_batch_normalization}')
-				notepad_file.write(f'\n\nArchitecture: {len(fil_size_stride_pool)} conv layers followed by {len(nbr_neurons)} fully connected layers, all have ReLU activation.\n')
-				notepad_file.write('More precisely and in this order the hidden layers are:')
-				for j in range(len(fil_size_stride_pool)):
-					notepad_file.write(f'\n - conv layer {j+1} with {fil_size_stride_pool[j][0]} filters of size {fil_size_stride_pool[j][1]} with stride {fil_size_stride_pool[j][2]}, 2x2Maxpool : {fil_size_stride_pool[j][3]} and L2reg : {use_L2reg_in_conv} (with coeff {beta})')
-				for j in range(len(nbr_neurons)):
-					notepad_file.write(f'\n - fully connected layer {j+1} with {nbr_neurons[j]} neurons, dropout with rate {keep_prob_training} and L2reg : {use_L2reg_in_full} (with coeff {beta})')
-				notepad_file.write(f'\n\nLast Cross-entropy: {print_cross_entropy} and Last Accuracy {print_nbr_correct_pred} / {batch_size}.')
-				if save_model:
-					model_filepath = os.path.join(save_dir, 'model.ckpt.data-00000-of-00001')
-					notepad_file.write(f'\n\nThe size of this model is : {os.path.getsize(model_filepath) >> 20} Mb.')
-				notepad_file.write('\n\nSUBMIT SCORE: ')
-
-			print('\nModel Properties saved')
-
-
-		# PREDICT ON TEST SET
-		if predict_test_set:
-			print('\nTesting begins')
-			x_csv_test = pd.read_csv(os.path.join(data_dir,'test.csv'))
-			x_test = preprocess_cv_test_data(x_csv_test, x_mean, x_std)
-			y_submission = pd.read_csv(os.path.join(data_dir,'sample_submission.csv'))
-
-			nbr_test_ex = x_test.shape[0]
-			batch_size_test = 100 # doesn't really matter, just a matter of balance for being able to print partial resutls
-			if nbr_test_ex % batch_size_test:
-				print('The size of the batch for the test set is not a divisor of the whole set, fix that to avoid issues at the end of the set')
-
-			# Do the prediction
-			for i in range(nbr_test_ex // batch_size_test):
-				print_prediction_class_test = sess.run(prediction_class, feed_dict={X:extract_batch_test(x_test, i, batch_size_test), keep_prob:1.0, is_train:False})
-				if (i+1) % 20 == 0:
-					print(f'Finishing test batch {i+1} / {nbr_test_ex / batch_size_test}')
-
-				for idx,value in enumerate(print_prediction_class_test):
-					y_submission['Label'].at[i*batch_size_test + idx] = value
-
-			# Save the prediction
-			y_submission.to_csv(os.path.join(save_dir,'submission_' +  datetime_now + '.csv'), index=False)
-
+		save_model_details()
+		print('\nModel Properties saved')
+		
+		
+		# Make ensemble out of predictions 
+		if ask_for_ensemble_at_end:
+			while "the answer is invalid":
+				reply = str(input('Would you like to make an ensemble out of all the predictions ? Enter your answer (y/n): ')).lower().strip()
+				if reply[:1] == 'n':
+					print('Okay bye.\n')
+					break
+				elif reply[:1] == 'y':
+					make_ensemble()
+					break
+				else:
+					print('Entry not valid. Try again, it\'s not that hard... :)')
 
 ### To DO :
-# change acvtivation
+# use more tboard : plot gradient norm in each layers for ex
+# hyper-tuning param: do it for 5 epochs or so, in a range. First in a bigger range with bigger steps, then finer
+# Use input normalization, should work better....
+# check test set done multiple times (maybe do first time without transform ?)
+# Data augmentation slows down the NN a lot, maybe do at first in another script and then no more ?
+# check neuron activation, norm of gradient, etc
+
+# fix bugs with enter answer IO of python...	
+# add identity shortcuts
+# DATA AUGM : for resizing, try cv2 also
