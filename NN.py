@@ -33,7 +33,7 @@ datetime_now = datetime_now[:datetime_now.find('.')]
 ########## Paths
 load_model = False
 loaded_model_name = 'model_20190210215510'
-train_data_name = 'train_x5_75%_2031.2_0.2'
+train_data_name = 'train_x1_100%_0_0_1.0_0.2'
 
 # Dir (Shouldn't need to be changed)
 if load_model:
@@ -63,8 +63,8 @@ use_tboard = True
 # Training Steps
 nbr_training_steps =  10000
 use_epochs_instead_of_it = True
-nbr_epochs = 100
-ask_for_more_training_epoch_min = 40 # only ask after xx epochs
+nbr_epochs = 250
+ask_for_more_training_epoch_min = 250 # only ask after xx epochs
 ask_for_more_training_epoch_freq = 5 # ask every xx epochs (after min number)
 
 # Prediction
