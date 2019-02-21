@@ -33,7 +33,7 @@ datetime_now = datetime_now[:datetime_now.find('.')]
 ########## Paths
 load_model = False
 loaded_model_name = 'model_20190210215510'
-train_data_name = 'train_20190221161754.csv'
+train_data_name = 'train_x5_75%_2031.2_0.2'
 
 # Dir (Shouldn't need to be changed)
 if load_model:
@@ -46,8 +46,8 @@ data_dir = os.path.join(os.getcwd(), 'data')
 external_pics_dir = os.path.join(os.getcwd(), 'extra_pics')
 
 # Path (Shouldn't need to be changed)
-train_data_path = os.path.join(data_dir, train_data_name)
-train_cv_data_path = os.path.join(data_dir, train_data_name[:-4] +'_cv_csv')
+train_data_path = os.path.join(data_dir, train_data_name + '.csv')
+train_cv_data_path = os.path.join(data_dir, train_data_name +'_cv.csv')
 load_model_path = os.path.join(load_model_dir, 'model.ckpt')
 filename_save_model_archi = os.path.join(save_dir, 'model_details.txt')
 filename_save_path = os.path.join(save_dir, 'model.ckpt')
@@ -64,8 +64,8 @@ use_tboard = True
 nbr_training_steps =  10000
 use_epochs_instead_of_it = True
 nbr_epochs = 100
-ask_for_more_training_epoch_min = 10 # only ask after xx epochs
-ask_for_more_training_epoch_freq = 1 # ask every xx epochs (after min number)
+ask_for_more_training_epoch_min = 40 # only ask after xx epochs
+ask_for_more_training_epoch_freq = 5 # ask every xx epochs (after min number)
 
 # Prediction
 predict_from_external_pics = False
@@ -85,7 +85,7 @@ plot_filter_evolution = True
 plot_wrong_classifications_at_end_training = False # change that to the number of batches to do
 
 # Plot Properties
-nbr_samples_to_visualize = 5
+nbr_samples_to_visualize = 2
 size_plot_per_filter = 1.5
 nbr_filters_per_row = 10
 nbr_filters_layer_0 = None # None means that we look at all of them
@@ -130,14 +130,17 @@ learning_rate = 0.1
 
 # The convolution layers (nbr of filters, filter size, (v_stride,h_stride), 2x2maxpool)
 fil_size_stride_pool.append([32, [3,3], [1,1], True])
+fil_size_stride_pool.append([64, [3,3], [1,1], True])
 
 # The full layers (nbr neurons)
+nbr_neurons.append(16)
 nbr_neurons.append(nbr_classes)
 
 # CV
 use_cv = True
 batch_size_cv = batch_size # so that I don't have to divide the cross-ent by batch_size and not loose precision
-cv_eval_nbr_iterations = freq_plot_acc * 5
+cv_eval_nbr_iterations = freq_plot_acc *20
+freq_print_cv_info_per_cv_calculation = 2
 
 #####################################################
 ##### Step 2 - Process Data
@@ -516,6 +519,9 @@ def plot_cross_ent_and_acc(cross_ent, acc, it, dataset_type='Training', savepath
 def save_model_details():
 	with open(filename_save_model_archi, 'w') as notepad_file:
 		notepad_file.write(f'Model from {datetime.now()}, trained for ({epoch:2.1f} epochs).')
+		
+		notepad_file.write(f'\nWe used the data from the file {train_data_name}, see there for more info.')
+		
 		if use_input_mean:
 			notepad_file.write(f'\nWe used data standardization by removing the mean (centering)')
 		if use_input_std:
@@ -573,11 +579,11 @@ def ask_for_more_training(epoch):
 			
 			while "the answer is invalid":
 				print('What now ?')
-				print(' - KEEP training (k)')
-				print(' - PREDICT test set, then KEEP training (p)')
-				print(' - PREDICT test set, SAVE the model, then KEEP training (a)')
-				print(' - PREDICT test set, SAVE the model, then STOP training (s)')
-				print(' - STOP training (q)')
+				print(f' - KEEP training {ask_for_more_training_epoch_freq} epochs (k)')
+				print(f' - PREDICT test set, then KEEP training {ask_for_more_training_epoch_freq} epochs (p)')
+				print(f' - PREDICT test set, SAVE the model, then KEEP training {ask_for_more_training_epoch_freq} epochs (a)')
+				print(f' - PREDICT test set, SAVE the model, then STOP training (s)')
+				print(f' - STOP training (q)')
 				reply = str(input('Enter your answer: ')).lower().strip()
 				if reply[:1] == 'k':
 					print('Training Resumed.\n')
@@ -675,7 +681,7 @@ with tf.name_scope('model_saver'):
 if load_model == False:
 
 	# Loading the data
-	print('\nLoading the data')
+	print('\nLoading the training data')
 	x_csv = pd.read_csv(train_data_path)
 	y_train = pd.get_dummies(x_csv['label'])
 	x_train = x_csv.drop('label', axis=1)
@@ -807,10 +813,9 @@ with tf.Session() as sess:
 
 			# CV
 			if use_cv and (i+1) % cv_eval_nbr_iterations == 0:
-				print(f'\nPerforming CV after {i+1} iterations, with {nbr_cv_ex // batch_size_cv} batches of {batch_size_cv} examples ({nbr_cv_ex*100/nbr_training_ex}% of the whole set)')
+				print(f'\nPerforming CV after {i+1} iterations, with {nbr_cv_ex // batch_size_cv} batches of {batch_size_cv} examples ({nbr_cv_ex*100/nbr_training_ex:2.1f}% of the whole set)')
 				print_cv_nbr_correct_pred_total = 0
 				print_cv_cross_entropy_total = 0
-				freq_print_cv_info = 10
 
 				if nbr_cv_ex % batch_size_cv != 0:
 					print(f'The cv_batch_size does not divide the number of cv_examples, the remainder ones will be ignored')
@@ -821,7 +826,7 @@ with tf.Session() as sess:
 					print_cv_cross_entropy_total += print_cv_cross_entropy
 					print_cv_nbr_correct_pred_total += print_cv_nbr_correct_pred
 
-					if (j+1) % freq_print_cv_info == 0:
+					if j > 0 and j % int((nbr_cv_ex // batch_size_cv) /freq_print_cv_info_per_cv_calculation ) == 0:
 						print(f'Finishing cv batch {j+1} / {nbr_cv_ex // batch_size_cv} with accuracy {print_cv_nbr_correct_pred} / {batch_size_cv} and average cross-ent {print_cv_cross_entropy_total / (j+1):5.8f}')
 
 				cross_ent_history_cv.append(print_cv_cross_entropy_total/ (nbr_cv_ex // batch_size_cv))
@@ -891,10 +896,9 @@ with tf.Session() as sess:
 
 ### To DO :
 # use more tboard : plot gradient norm in each layers for ex
-# hyper-tuning param: do it for 5 epochs or so, in a range. First in a bigger range with bigger steps, then finer
-# Use input normalization, should work better....
 # check test set done multiple times (maybe do first time without transform ?)
 # check neuron activation, norm of gradient, etc
-
+# increase batch size as epoch number gets bigger
+	
 # fix bugs with enter answer IO of python...	
 # add identity shortcuts
