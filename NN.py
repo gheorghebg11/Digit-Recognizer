@@ -14,7 +14,6 @@ from PIL import Image
 import tensorflow as tf
 import numpy as np
 import pandas as pd
-from skimage import transform
 
 tf.reset_default_graph()
 np.set_printoptions(precision=2, suppress=True, threshold=np.nan)
@@ -34,8 +33,9 @@ datetime_now = datetime_now[:datetime_now.find('.')]
 ########## Paths
 load_model = False
 loaded_model_name = 'model_20190210215510'
+train_data_name = 'train_20190221161754.csv'
 
-# Dir
+# Dir (Shouldn't need to be changed)
 if load_model:
 	save_dir = os.path.join(os.getcwd(), 'loaded_' + loaded_model_name + '_' + datetime_now)
 else:
@@ -45,7 +45,9 @@ load_model_dir = os.path.join(os.getcwd(), loaded_model_name)
 data_dir = os.path.join(os.getcwd(), 'data')
 external_pics_dir = os.path.join(os.getcwd(), 'extra_pics')
 
-# Path
+# Path (Shouldn't need to be changed)
+train_data_path = os.path.join(data_dir, train_data_name)
+train_cv_data_path = os.path.join(data_dir, train_data_name[:-4] +'_cv_csv')
 load_model_path = os.path.join(load_model_dir, 'model.ckpt')
 filename_save_model_archi = os.path.join(save_dir, 'model_details.txt')
 filename_save_path = os.path.join(save_dir, 'model.ckpt')
@@ -62,8 +64,8 @@ use_tboard = True
 nbr_training_steps =  10000
 use_epochs_instead_of_it = True
 nbr_epochs = 100
-ask_for_more_training_epoch_min = 20 # only ask after xx epochs
-ask_for_more_training_epoch_freq = 5 # ask every xx epochs (after min number)
+ask_for_more_training_epoch_min = 10 # only ask after xx epochs
+ask_for_more_training_epoch_freq = 1 # ask every xx epochs (after min number)
 
 # Prediction
 predict_from_external_pics = False
@@ -83,7 +85,7 @@ plot_filter_evolution = True
 plot_wrong_classifications_at_end_training = False # change that to the number of batches to do
 
 # Plot Properties
-nbr_samples_to_visualize = 0
+nbr_samples_to_visualize = 5
 size_plot_per_filter = 1.5
 nbr_filters_per_row = 10
 nbr_filters_layer_0 = None # None means that we look at all of them
@@ -95,19 +97,13 @@ freq_plot_filters = freq_plot_acc * 10
 freq_plot_filter_evolution = freq_plot_acc * 10 
 
 ########## Some Variables for the Architecture
-# Data augmentation
-use_data_augmentation = False
-max_rotation_angle = 20
-max_scalling_factor = 1.2
-max_shift_pixels = 3
-
 # Initialization weights
 use_Xavier_init = False
 use_He_init = False # if both are true, He takes priority, if None use normal dist (mean=0,std=0.1)
 
 # Activation
 activation_choices = ['ReLU', 'LReLU', 'tanh', 'sigmoid']
-activ = 'ReLU'
+activ = 'sigmoid'
 activ_lrelu_alpha = 0.01
 
 # Normalization
@@ -129,22 +125,17 @@ keep_prob_training = 1.0 #dropout variable, set to 1 to ignore dropout, only on 
 
 # Optimizer
 choices_gd = ['SGD', 'Adam']
-optimizer_gd = 'Adam'
+optimizer_gd = 'SGD'
 learning_rate = 0.1
 
 # The convolution layers (nbr of filters, filter size, (v_stride,h_stride), 2x2maxpool)
 fil_size_stride_pool.append([32, [3,3], [1,1], True])
-fil_size_stride_pool.append([64, [3,3], [1,1], True])
 
 # The full layers (nbr neurons)
-nbr_neurons.append(128)
 nbr_neurons.append(nbr_classes)
 
 # CV
 use_cv = True
-use_data_augmentation_cv = False
-cv_set_fraction = 0.05
-is_cv_split_random = False
 batch_size_cv = batch_size # so that I don't have to divide the cross-ent by batch_size and not loose precision
 cv_eval_nbr_iterations = freq_plot_acc * 5
 
@@ -175,7 +166,6 @@ def preprocess_training_data(x_data, nbr_samples_to_visualize = 0):
 	return x_data, x_mean, x_std
 
 def preprocess_cv_test_data(x_data, x_mean, x_std):
-
 	x_data = x_data / 255
 	x_data = (x_data - x_mean) / (x_std + 0.01)
 	x_data.fillna(0 , inplace=True)
@@ -193,9 +183,6 @@ def visualize_samples(nbr_samples_to_visualize, x_data, y_labels):
 
 		image = np.array(x_data.iloc[random_sample]).reshape(28,28)
 
-		if use_data_augmentation:
-			image = random_transform(image.reshape(1,28,28,1)).reshape(28,28)
-
 		fig, ax = plt.subplots(1,2, figsize=(15,4))
 
 		ax[0].plot(image.reshape(28*28))
@@ -206,15 +193,9 @@ def visualize_samples(nbr_samples_to_visualize, x_data, y_labels):
 		plt.show()
 
 		if use_input_mean == True or use_input_std == True:
-			if use_data_augmentation:
-				print(f'Image {i+1} / {nbr_samples_to_visualize}: The data has be standardized before plotting. The data has been randomly rotated, scaled and shifted. The true label is {y_labels.iloc[random_sample].idxmax()}')
-			else:
-				print(f'Image {i+1} / {nbr_samples_to_visualize}: The data has be standardized before plotting. The true label is {y_labels.iloc[random_sample].idxmax()}')
+			print(f'Image {i+1} / {nbr_samples_to_visualize}: The data has be standardized before plotting. The true label is {y_labels.iloc[random_sample].idxmax()}')
 		else:
-			if use_data_augmentation:
-				print(f'Image {i+1} / {nbr_samples_to_visualize}: The data has been randomly rotated, scaled and shifted. The true label is {y_labels.iloc[random_sample].idxmax()}')
-			else:
-				print(f'Image {i+1} / {nbr_samples_to_visualize}: The true label is {y_labels.iloc[random_sample].idxmax()}')
+			print(f'Image {i+1} / {nbr_samples_to_visualize}: The true label is {y_labels.iloc[random_sample].idxmax()}')
 
 def plot_distribution_classes(y_labels, type_dataset):
 	print(f'Here is the distribution of the classes, for the {type_dataset} set')
@@ -324,31 +305,7 @@ def full_layer(nbr_layer, input, nbr_output, use_batch_normalization, activ = Tr
 		return input
 
 ############ Create batch
-def random_transform(x_data):
-
-	for i in range(x_data.shape[0]):
-		angle = random.uniform(-max_rotation_angle, max_rotation_angle)
-		scaling_factor = random.uniform(1.0 / max_scalling_factor, max_scalling_factor)
-		shift_v = random.randint(-max_shift_pixels, max_shift_pixels)
-		shift_h = random.randint(-max_shift_pixels, max_shift_pixels)
-
-		# rescale
-		rescaled_im = transform.rescale(x_data[i], scaling_factor, anti_aliasing=True, multichannel =False, mode='constant')
-		diff_to_28 = rescaled_im.shape[0] - 28
-		if diff_to_28 < 0:
-			x_data[i] = np.pad(rescaled_im, pad_width=[[-math.ceil(diff_to_28/2),-math.floor(diff_to_28/2)], [-math.ceil(diff_to_28/2),-math.floor(diff_to_28/2)], [0,0]], mode='edge')
-		elif diff_to_28 > 0:
-			x_data[i] = rescaled_im[math.ceil(diff_to_28/2) : 28 + math.ceil(diff_to_28/2), math.ceil(diff_to_28/2) : 28 + math.ceil(diff_to_28/2),:]
-
-		# rotate
-		x_data[i] = transform.rotate(x_data[i], angle)
-
-		# shift
-		x_data[i] = np.pad(x_data[i], pad_width=[[max_shift_pixels,max_shift_pixels], [max_shift_pixels,max_shift_pixels], [0,0]], mode='edge')[max_shift_pixels+shift_v : 28+max_shift_pixels+shift_v, max_shift_pixels+shift_h : 28+max_shift_pixels+shift_h,:]
-
-	return x_data
-
-def extract_batch(x_data, y_data, batch_nbr, batch_size, use_transform=False):
+def extract_batch(x_data, y_data, batch_nbr, batch_size):
 	nbr_training_ex = x_data.shape[0]
 	batch_start = batch_nbr * batch_size % nbr_training_ex
 	batch_end = (batch_nbr + 1) * batch_size % nbr_training_ex
@@ -362,27 +319,10 @@ def extract_batch(x_data, y_data, batch_nbr, batch_size, use_transform=False):
 		else:
 			output = [np.vstack([x_data[batch_start:], x_data[:batch_end]]).reshape(batch_size, 28,28,1), pd.concat([y_data.iloc[batch_start:], y_data.iloc[:batch_end]], ignore_index = True) ]
 
-	if use_transform:
-		return random_transform(output[0]), output[1]
-	else:
-		return output
+	return output
 
 def shuffle_dataset(x_data, y_label, random_seed = np.random.randint(100000)):
 	return [x_data.sample(frac=1.0, random_state=random_seed), y_label.sample(frac=1.0, random_state=random_seed)]
-
-def split_train_test(x_data, y_label, random_split, cv_set_fraction = 0.2):
-	nbr_total_ex = x_data.shape[0]
-
-	nbr_cv_ex = int(nbr_total_ex*cv_set_fraction)
-	nbr_cv_ex -= (nbr_cv_ex % batch_size_cv)
-
-	nbr_train_ex = nbr_total_ex - nbr_cv_ex
-
-	if random_split:
-		x_data = x_data.sample(frac=1.0)
-		y_label = y_label.sample(frac=1.0)
-
-	return [x_data[:nbr_train_ex], y_label[:nbr_train_ex], x_data[nbr_train_ex:], y_label[nbr_train_ex:]]
 
 def extract_batch_test(x_data, batch_nbr, batch_size):
 	nbr_test_ex = x_data.shape[0]
@@ -397,10 +337,7 @@ def extract_batch_test(x_data, batch_nbr, batch_size):
 		else:
 			output = np.vstack([x_data[batch_start:], x_data[:batch_end]]).reshape(batch_size, 28,28,1)
 
-	if nbr_random_copies_of_test_set > 1:
-		return random_transform(output)
-	else:
-		return output
+	return output
 
 
 ############ Predictions
@@ -542,16 +479,6 @@ def plot_filter_evolution(iteration_step, filter_layer=0, filter_nbr=0, save = F
 		plt.show()
 
 def plot_cross_ent_and_acc(cross_ent, acc, it, dataset_type='Training', savepath = None):
-
-# =============================================================================
-# 	plt.figure(figsize=(15,4))
-# 	plt.plot(cross_ent, label = dataset_type + ' cross-ent')
-# 	plt.legend(loc ='upper right')
-# 	plt.title(f'{dataset_type} cross-entropy after {it+1} iterations (epoch {epoch:2.2f}) of training')
-# 	if cross_ent_history_train[0] > cross_ent_history_train[-1]*10:
-# 		plt.yscale('log')
-# 	plt.show()
-# =============================================================================
 	
 	fig, ax1 = plt.subplots(figsize=(12,4))
 	ax1.set_xlabel(f'number of epochs')
@@ -589,11 +516,6 @@ def plot_cross_ent_and_acc(cross_ent, acc, it, dataset_type='Training', savepath
 def save_model_details():
 	with open(filename_save_model_archi, 'w') as notepad_file:
 		notepad_file.write(f'Model from {datetime.now()}, trained for ({epoch:2.1f} epochs).')
-		if use_data_augmentation:
-			notepad_file.write(f'\n\nWe used data augmentation with')
-			notepad_file.write(f'\n - a rotation given by a random angle between {-max_rotation_angle} and {max_rotation_angle}')
-			notepad_file.write(f'\n - a rescaling given by a random factor between {1/ max_scalling_factor:1.2f} and {max_scalling_factor:1.2f}')
-			notepad_file.write(f'\n - a (vertical and horizontal) shift given by a random number of pixels up to {max_shift_pixels} units')
 		if use_input_mean:
 			notepad_file.write(f'\nWe used data standardization by removing the mean (centering)')
 		if use_input_std:
@@ -753,22 +675,24 @@ with tf.name_scope('model_saver'):
 if load_model == False:
 
 	# Loading the data
-	print('Loading the data')
-	x_csv = pd.read_csv(os.path.join(data_dir,'train.csv'))
+	print('\nLoading the data')
+	x_csv = pd.read_csv(train_data_path)
 	y_train = pd.get_dummies(x_csv['label'])
 	x_train = x_csv.drop('label', axis=1)
 	print('Data loaded')
 
-	# Preprocesing the data + split CV
-	if use_cv:
-		x_train, y_train, x_cv, y_cv = split_train_test(x_train, y_train, is_cv_split_random, cv_set_fraction)
-
+	# Preprocesing the data 
 	x_train, x_mean, x_std = preprocess_training_data(x_train, nbr_samples_to_visualize)
 	nbr_training_ex = x_train.shape[0]
-
+	
 	if use_cv:
+		print('\nLoading the CV data')
+		x_cv_csv = pd.read_csv(train_cv_data_path)
+		y_cv = pd.get_dummies(x_cv_csv['label'])
+		x_cv = x_cv_csv.drop('label', axis=1)
 		x_cv = preprocess_cv_test_data(x_cv, x_mean, x_std)
 		nbr_cv_ex = x_cv.shape[0]
+		print('Data loaded')
 
 	# Visualization
 	if nbr_samples_to_visualize!= 0:
@@ -776,7 +700,8 @@ if load_model == False:
 
 	if plot_distrib:
 		plot_distribution_classes(y_train, 'train')
-		plot_distribution_classes(y_cv, 'cross-validation')
+		if use_cv:
+			plot_distribution_classes(y_cv, 'cross-validation')
 		plot_distribution_per_pixel(x_train, (10,10), 'train')
 
 elif load_model == True:
@@ -860,7 +785,7 @@ with tf.Session() as sess:
 				print(f'\nBeginning of epoch {int(epoch)}, data set shuffled')
 
 			# Training
-			_, summary, print_cross_entropy, print_nbr_correct_pred = sess.run([train_step, merged, cross_entropy, nbr_correct_predictions], feed_dict={(X,Y):extract_batch(x_train, y_train, i, batch_size, use_data_augmentation), keep_prob:keep_prob_training, is_train:True})
+			_, summary, print_cross_entropy, print_nbr_correct_pred = sess.run([train_step, merged, cross_entropy, nbr_correct_predictions], feed_dict={(X,Y):extract_batch(x_train, y_train, i, batch_size), keep_prob:keep_prob_training, is_train:True})
 			if (i+1) % freq_plot_acc == 0:
 				print(f'Epoch {epoch:2.2f} ({i+1}th step) with accuracy {print_nbr_correct_pred} / {batch_size} and cross-ent {print_cross_entropy:5.8f}')
 				cross_ent_history_train.append(print_cross_entropy)
@@ -882,7 +807,7 @@ with tf.Session() as sess:
 
 			# CV
 			if use_cv and (i+1) % cv_eval_nbr_iterations == 0:
-				print(f'\nPerforming CV after {i+1} iterations, with {nbr_cv_ex // batch_size_cv} batches of {batch_size_cv} examples ({int(cv_set_fraction*100)}% of the whole set)')
+				print(f'\nPerforming CV after {i+1} iterations, with {nbr_cv_ex // batch_size_cv} batches of {batch_size_cv} examples ({nbr_cv_ex*100/nbr_training_ex}% of the whole set)')
 				print_cv_nbr_correct_pred_total = 0
 				print_cv_cross_entropy_total = 0
 				freq_print_cv_info = 10
@@ -891,7 +816,7 @@ with tf.Session() as sess:
 					print(f'The cv_batch_size does not divide the number of cv_examples, the remainder ones will be ignored')
 
 				for j in range(nbr_cv_ex // batch_size_cv):
-					print_cv_cross_entropy, print_cv_nbr_correct_pred = sess.run([cross_entropy, nbr_correct_predictions], feed_dict={(X,Y):extract_batch(x_cv, y_cv, j, batch_size_cv, use_data_augmentation_cv), keep_prob:1.0, is_train:False})
+					print_cv_cross_entropy, print_cv_nbr_correct_pred = sess.run([cross_entropy, nbr_correct_predictions], feed_dict={(X,Y):extract_batch(x_cv, y_cv, j, batch_size_cv), keep_prob:1.0, is_train:False})
 
 					print_cv_cross_entropy_total += print_cv_cross_entropy
 					print_cv_nbr_correct_pred_total += print_cv_nbr_correct_pred
@@ -969,9 +894,7 @@ with tf.Session() as sess:
 # hyper-tuning param: do it for 5 epochs or so, in a range. First in a bigger range with bigger steps, then finer
 # Use input normalization, should work better....
 # check test set done multiple times (maybe do first time without transform ?)
-# Data augmentation slows down the NN a lot, maybe do at first in another script and then no more ?
 # check neuron activation, norm of gradient, etc
 
 # fix bugs with enter answer IO of python...	
 # add identity shortcuts
-# DATA AUGM : for resizing, try cv2 also
