@@ -1,0 +1,9 @@
+- change activation
+- change init --> should converge faster
+- use input std
+- change Adam
+- add Reg
+- add Dropout
+- use BN
+
+-- change archi

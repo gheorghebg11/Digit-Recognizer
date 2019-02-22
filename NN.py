@@ -10,6 +10,8 @@ import os
 from datetime import datetime
 import matplotlib.pyplot as plt
 from PIL import Image
+import time
+
 
 import tensorflow as tf
 import numpy as np
@@ -54,6 +56,7 @@ filename_save_path = os.path.join(save_dir, 'model.ckpt')
 tensorboard_path = os.path.join(save_dir)
 filters_layer_0_savepath = os.path.join(save_dir, 'filters.png')
 filter_evolution_savepath = os.path.join(save_dir, 'filter_evolution.png')
+cross_ent_savepath= os.path.join(save_dir, 'cross_entropy_and_acc.png')
 cross_ent_train_savepath = os.path.join(save_dir, 'cross_entropy_train.png')
 cross_ent_cv_savepath = os.path.join(save_dir, 'cross_entropy_cv.png')
 
@@ -63,8 +66,8 @@ use_tboard = True
 # Training Steps
 nbr_training_steps =  10000
 use_epochs_instead_of_it = True
-nbr_epochs = 250
-ask_for_more_training_epoch_min = 250 # only ask after xx epochs
+nbr_epochs = 100
+ask_for_more_training_epoch_min = 1    # only ask after xx epochs
 ask_for_more_training_epoch_freq = 5 # ask every xx epochs (after min number)
 
 # Prediction
@@ -85,16 +88,17 @@ plot_filter_evolution = True
 plot_wrong_classifications_at_end_training = False # change that to the number of batches to do
 
 # Plot Properties
-nbr_samples_to_visualize = 2
+nbr_samples_to_visualize = 1
 size_plot_per_filter = 1.5
 nbr_filters_per_row = 10
 nbr_filters_layer_0 = None # None means that we look at all of them
 
 # Plot Frequencies
-freq_plot_acc = 20
-freq_plot_cross_ent = freq_plot_acc * 10
-freq_plot_filters = freq_plot_acc * 10 
-freq_plot_filter_evolution = freq_plot_acc * 10 
+freq_calc_acc = 20
+freq_print_acc = freq_calc_acc * 0
+# freq_plot_cross_ent = freq_calc_acc * 10
+freq_plot_filters = freq_calc_acc * 20 
+freq_plot_filter_evolution = freq_calc_acc * 20 
 
 ########## Some Variables for the Architecture
 # Initialization weights
@@ -103,7 +107,7 @@ use_He_init = False # if both are true, He takes priority, if None use normal di
 
 # Activation
 activation_choices = ['ReLU', 'LReLU', 'tanh', 'sigmoid']
-activ = 'sigmoid'
+activ = 'ReLU'
 activ_lrelu_alpha = 0.01
 
 # Normalization
@@ -139,8 +143,10 @@ nbr_neurons.append(nbr_classes)
 # CV
 use_cv = True
 batch_size_cv = batch_size # so that I don't have to divide the cross-ent by batch_size and not loose precision
-cv_eval_nbr_iterations = freq_plot_acc *20
-freq_print_cv_info_per_cv_calculation = 2
+freq_eval_cv = freq_calc_acc *5
+freq_print_cv = freq_eval_cv * 0
+freq_plot_cv = freq_eval_cv * 5
+freq_print_cv_info_per_cv_calculation = 0
 
 #####################################################
 ##### Step 2 - Process Data
@@ -481,7 +487,7 @@ def plot_filter_evolution(iteration_step, filter_layer=0, filter_nbr=0, save = F
 	else:
 		plt.show()
 
-def plot_cross_ent_and_acc(cross_ent, acc, it, dataset_type='Training', savepath = None):
+def plot_cross_ent_and_acc(cross_ent, acc, it, dataset_type='Training', cross_ent_2 = None, acc_2 = None, savepath = None):
 	
 	fig, ax1 = plt.subplots(figsize=(12,4))
 	ax1.set_xlabel(f'number of epochs')
@@ -492,41 +498,61 @@ def plot_cross_ent_and_acc(cross_ent, acc, it, dataset_type='Training', savepath
 	
 	color = 'tab:red'
 	ax1.set_ylabel(dataset_type + ' cross-ent', color=color)
-	ax1.plot(x_axis, cross_ent, color=color)
+	ax1.plot(x_axis, cross_ent, color=color, label =f'{dataset_type} cross-ent')
 	ax1.tick_params(axis='y', labelcolor=color)
-	if cross_ent_history_train[0] > cross_ent_history_train[-1]*5:
+	if cross_ent[0] > cross_ent[-1]*5:
 		ax1.set_yscale('log')
 	
 	ax2 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
 	color = 'tab:blue'
 	ax2.set_ylabel(dataset_type + ' accuracy', color=color)  # we already handled the x-label with ax1
-	ax2.plot(x_axis, acc, color=color)
+	ax2.plot(x_axis, acc, color=color, label =f'{dataset_type} accuracy')
 	ax2.tick_params(axis='y', labelcolor=color)
 	plt.ylim(bottom=0.85, top = 1.01)
 	
 	fig.tight_layout()  # otherwise the right y-label is slightly clipped
 	plt.title(f'{dataset_type} cross-entropy and accuracy after {it+1} iterations (epoch {epoch:2.2f}) of training')
-	plt.show()
 	
+	if cross_ent_2 != None:
+		x_axis = np.arange(epoch/len(acc_2), epoch+ epoch/len(acc_2), epoch/len(acc_2))
+		if len(x_axis) != len(acc_2): # this could be due to rounding errors
+			x_axis = x_axis[:-1]
+		ax1.plot(x_axis, cross_ent_2, color='tab:orange', linewidth=3, label ='CV cross-ent' )
+		ax1.set_ylabel('cross-ent', color=color)
+		#ax1.legend(loc = 'lower left')
+		ax2.plot(x_axis, acc_2, color='tab:cyan', linewidth=3, label ='CV accuracy')
+		ax2.set_ylabel(' accuracy', color=color)
+		#ax2.legend(loc = 'center left')
+		lines, labels = ax1.get_legend_handles_labels()
+		lines2, labels2 = ax2.get_legend_handles_labels()
+		ax2.legend(lines + lines2, labels + labels2, loc='lower left')
+		plt.title(f'Cross-entropy and accuracy after {it+1} iterations (epoch {epoch:2.2f}) of training')
+
 	if savepath != None:
 		plt.savefig(fname = savepath)
-		print(f'\nSaved graph for the {dataset_type} cross-entropy')
-
+		if cross_ent_2 != None:
+			print(f'\nSaved graph for cross-entropy and accuracy')
+		else:
+			print(f'\nSaved graph for the {dataset_type} cross-entropy')
+		
+	plt.show()
 	plt.close() # close it so it doesn't print at the end
 
 
 ############ Saving Stuff
 def save_model_details():
 	with open(filename_save_model_archi, 'w') as notepad_file:
-		notepad_file.write(f'Model from {datetime.now()}, trained for ({epoch:2.1f} epochs).')
+		notepad_file.write(f'Model from {datetime.now()}, trained for ({epoch:2.1f} epochs), which took {(end_time - start_time) / 60:3.1f} minutes.')
 		
-		notepad_file.write(f'\nWe used the data from the file {train_data_name}, see there for more info.')
+		notepad_file.write(f'\n\nData : we used the data from the file {train_data_name}, here are its characteristics:\n')
+		with open(os.path.join(data_dir, train_data_name + '_details.txt'), 'r') as data_details_file: 
+			notepad_file.write(data_details_file.read())
 		
 		if use_input_mean:
 			notepad_file.write(f'\nWe used data standardization by removing the mean (centering)')
 		if use_input_std:
 			notepad_file.write(f'and diving by the standard deviation')
-		notepad_file.write(f'\n\nThe weights were initialized ')
+		notepad_file.write(f'\n\nInitialization: the weights of the NN were initialized ')
 		if use_He_init:
 			notepad_file.write(f'using He initialization.')
 		elif use_Xavier_init:
@@ -557,7 +583,7 @@ def save_model_details():
 				notepad_file.write(f', dropout with rate {keep_prob_training}')
 			if use_L2reg_in_conv:
 				notepad_file.write(f', L2 reg with coeff {beta}')
-		notepad_file.write(f'\n\nLast Cross-entropy: {print_cross_entropy:2.5f} and Last Accuracy {print_nbr_correct_pred} / {batch_size}.')
+		notepad_file.write(f'\n\nLast CV Cross-entropy: {cross_ent_history_cv[-1]:5.8f} and Last CV Accuracy {print_cv_nbr_correct_pred_total} / {nbr_cv_ex} = {print_cv_nbr_correct_pred_total / nbr_cv_ex:0.4f}.')
 		if save_model_at_end:
 			model_filepath = os.path.join(save_dir, 'model.ckpt.data-00000-of-00001')
 			notepad_file.write(f'\n\nThe size of this model is : {os.path.getsize(model_filepath) >> 20} Mb.')
@@ -574,8 +600,12 @@ def ask_for_more_training(epoch):
 			print('\nHere is the summary so far:')
 			plot_filters(i+1, nbr_filters=nbr_filters_layer_0)
 			plot_filter_evolution(i+1)
-			plot_cross_ent_and_acc(cross_ent_history_train, accuracy_history_train, i)
-			plot_cross_ent_and_acc(cross_ent_history_cv, accuracy_history_cv, i, dataset_type='CV')
+			plot_cross_ent_and_acc(cross_ent_history_train, accuracy_history_train, i, cross_ent_2 = cross_ent_history_cv, acc_2 = accuracy_history_cv)
+
+# =============================================================================
+# 			plot_cross_ent_and_acc(cross_ent_history_train, accuracy_history_train, i)
+# 			plot_cross_ent_and_acc(cross_ent_history_cv, accuracy_history_cv, i, dataset_type='CV')
+# =============================================================================
 			
 			while "the answer is invalid":
 				print('What now ?')
@@ -698,7 +728,7 @@ if load_model == False:
 		x_cv = x_cv_csv.drop('label', axis=1)
 		x_cv = preprocess_cv_test_data(x_cv, x_mean, x_std)
 		nbr_cv_ex = x_cv.shape[0]
-		print('Data loaded')
+		print('Data loaded\n')
 
 	# Visualization
 	if nbr_samples_to_visualize!= 0:
@@ -776,6 +806,8 @@ with tf.Session() as sess:
 		cross_ent_history_cv = []
 		accuracy_history_cv = []
 		
+		start_time = time.time()
+		
 		# TRAINING
 		for i in range(nbr_training_steps):
 			epoch = i*batch_size / nbr_training_ex
@@ -792,10 +824,12 @@ with tf.Session() as sess:
 
 			# Training
 			_, summary, print_cross_entropy, print_nbr_correct_pred = sess.run([train_step, merged, cross_entropy, nbr_correct_predictions], feed_dict={(X,Y):extract_batch(x_train, y_train, i, batch_size), keep_prob:keep_prob_training, is_train:True})
-			if (i+1) % freq_plot_acc == 0:
-				print(f'Epoch {epoch:2.2f} ({i+1}th step) with accuracy {print_nbr_correct_pred} / {batch_size} and cross-ent {print_cross_entropy:5.8f}')
+			if (i+1) % freq_calc_acc == 0:
 				cross_ent_history_train.append(print_cross_entropy)
 				accuracy_history_train.append(print_nbr_correct_pred / batch_size)
+				if freq_print_acc != 0 and (i+1) % freq_print_acc == 0:
+					print(f'Epoch {epoch:2.2f} ({i+1}th step) with accuracy {print_nbr_correct_pred} / {batch_size} and cross-ent {print_cross_entropy:5.8f}')
+
 			if use_tboard:
 				train_writer.add_summary(summary, i)
 
@@ -807,13 +841,16 @@ with tf.Session() as sess:
 			if freq_plot_filter_evolution != None and (i+1) % freq_plot_filter_evolution == 0 and plot_filter_evolution:
 				plot_filter_evolution(i+1)
 			
-			# Plotting Train cross-ent
-			if (i+1) % freq_plot_cross_ent == 0:
-				plot_cross_ent_and_acc(cross_ent_history_train, accuracy_history_train, i)
+# =============================================================================
+# 			# Plotting Train cross-ent
+# 			if (i+1) % freq_plot_cross_ent == 0:
+# 				plot_cross_ent_and_acc(cross_ent_history_train, accuracy_history_train, i)
+# =============================================================================
 
 			# CV
-			if use_cv and (i+1) % cv_eval_nbr_iterations == 0:
-				print(f'\nPerforming CV after {i+1} iterations, with {nbr_cv_ex // batch_size_cv} batches of {batch_size_cv} examples ({nbr_cv_ex*100/nbr_training_ex:2.1f}% of the whole set)')
+			if use_cv and (i+1) % freq_eval_cv == 0:
+				if freq_print_cv != 0 and (i+1) % freq_print_cv == 0:
+					print(f'\nPerforming CV after {i+1} iterations, with {nbr_cv_ex // batch_size_cv} batches of {batch_size_cv} examples ({nbr_cv_ex*100/nbr_training_ex:2.1f}% of the whole set)')
 				print_cv_nbr_correct_pred_total = 0
 				print_cv_cross_entropy_total = 0
 
@@ -826,16 +863,20 @@ with tf.Session() as sess:
 					print_cv_cross_entropy_total += print_cv_cross_entropy
 					print_cv_nbr_correct_pred_total += print_cv_nbr_correct_pred
 
-					if j > 0 and j % int((nbr_cv_ex // batch_size_cv) /freq_print_cv_info_per_cv_calculation ) == 0:
-						print(f'Finishing cv batch {j+1} / {nbr_cv_ex // batch_size_cv} with accuracy {print_cv_nbr_correct_pred} / {batch_size_cv} and average cross-ent {print_cv_cross_entropy_total / (j+1):5.8f}')
+					if j > 0 and freq_print_cv_info_per_cv_calculation!= 0:
+						if j % int((nbr_cv_ex // batch_size_cv) /freq_print_cv_info_per_cv_calculation ) == 0:
+							print(f'Finishing cv batch {j+1} / {nbr_cv_ex // batch_size_cv} with accuracy {print_cv_nbr_correct_pred} / {batch_size_cv} and average cross-ent {print_cv_cross_entropy_total / (j+1):5.8f}')
 
 				cross_ent_history_cv.append(print_cv_cross_entropy_total/ (nbr_cv_ex // batch_size_cv))
 				accuracy_history_cv.append(print_cv_nbr_correct_pred_total / nbr_cv_ex)
-				print(f'CV accuracy avg {print_cv_nbr_correct_pred_total} / {nbr_cv_ex} = {print_cv_nbr_correct_pred_total / nbr_cv_ex:0.4f} and cross-ent avg {cross_ent_history_cv[-1]:5.8f}\n')
+				
+				if freq_print_cv != 0 and (i+1) % freq_print_cv == 0:
+					print(f'CV accuracy avg {print_cv_nbr_correct_pred_total} / {nbr_cv_ex} = {print_cv_nbr_correct_pred_total / nbr_cv_ex:0.4f} and cross-ent avg {cross_ent_history_cv[-1]:5.8f}\n')
+				
+				if freq_plot_cv != 0 and (i+1) % freq_plot_cv == 0:
+					plot_cross_ent_and_acc(cross_ent_history_train, accuracy_history_train, i, cross_ent_2 = cross_ent_history_cv, acc_2 = accuracy_history_cv)
 
-				plot_cross_ent_and_acc(cross_ent_history_cv, accuracy_history_cv, i, dataset_type='CV')
-
-			
+		end_time = time.time()
 
 		# END OF TRAINING
 		print(f'\n--------------------------------------------------------\nTraining finished after {epoch:2.2f} epochs and {nbr_training_steps} training steps.\n--------------------------------------------------------')
@@ -843,11 +884,11 @@ with tf.Session() as sess:
 		print(f'\nSaving model in {save_dir}')
 
 		# SAVE FILTERS & Cross-Entropy
-		# Training Cross-Entropy
+		# Cross-Entropy and Accuracy
+		plot_cross_ent_and_acc(cross_ent_history_train, accuracy_history_train, nbr_training_steps, savepath = cross_ent_savepath, cross_ent_2 = cross_ent_history_cv, acc_2 = accuracy_history_cv)
 		plot_cross_ent_and_acc(cross_ent_history_train, accuracy_history_train, nbr_training_steps, savepath = cross_ent_train_savepath)
+		plot_cross_ent_and_acc(cross_ent_history_cv, accuracy_history_cv, nbr_training_steps, dataset_type = 'CV', savepath = cross_ent_cv_savepath)
 
-		# CV Cross-Entropy
-		plot_cross_ent_and_acc(cross_ent_history_cv, accuracy_history_cv, nbr_training_steps, dataset_type='CV', savepath = cross_ent_cv_savepath)
 
 		# Filters
 		if save_png_filters_layer_0_at_end:

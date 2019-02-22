@@ -8,13 +8,11 @@ import math
 import random
 import os
 from datetime import datetime
-import time
 import matplotlib.pyplot as plt
 
 import numpy as np
 import pandas as pd
 from skimage import transform
-from skimage import img_as_ubyte
 
 np.set_printoptions(precision=2, suppress=True, threshold=np.nan)
 
@@ -36,19 +34,22 @@ data_path = 'train'
 
 ########## Some Variables for the Architecture
 # Data augmentation
-multiply_by = 2 #by a factor of how much we augment the amount of data
+multiply_by = 1 #by a factor of how much we augment the amount of data
 
 max_rotation_angle = 20
 max_scalling_factor = 1.2
 max_shift_pixels = 3
 
+# Use all of the data ?
+percentage_data_to_use = 100
+
 ##### CV
 batch_size_cv = 128 # this is for the NN, ensuring that the # of CV examples is a multiple of batch_size_cv
 random_split_cv = True
-cv_set_fraction = 0.1
+cv_set_fraction = 0.2
 
 # Visualization
-nbr_samples_to_visualize = 10
+nbr_samples_to_visualize = 5
 
 ######### Some Functions
 def transform_image(img):
@@ -114,7 +115,7 @@ def split_train_test(xy_data, random_split, cv_set_fraction):
 
 # input x_data, y_labels:pandas df
 def visualize_samples(nbr_samples_to_visualize, xy_data):
-	print(f'Visualizing {nbr_samples_to_visualize} image(s) :')
+	print(f'\nVisualizing {nbr_samples_to_visualize} image(s) :')
 
 	for i in range(nbr_samples_to_visualize):
 		random_sample = random.randint(0,xy_data.shape[0])
@@ -130,16 +131,18 @@ def visualize_samples(nbr_samples_to_visualize, xy_data):
 
 		plt.show()
 
-	print(f'Image {i+1} / {nbr_samples_to_visualize}: The data has been randomly rotated, scaled and shifted. The true label is {xy_data.iloc[random_sample,1]}')
-
 
 ########### THE ACTION
 
 
 filename = data_path + '.csv'
 print(f'Loading {filename}')
-x_csv = pd.read_csv(os.path.join(data_dir,filename)).iloc[:2000]
+x_csv = pd.read_csv(os.path.join(data_dir,filename))
 print(f'Data loaded')
+
+
+nbr_ex = int(percentage_data_to_use * x_csv.shape[0] / 100)
+x_csv = x_csv.iloc[:nbr_ex]
 
 x_train, x_cv = split_train_test(x_csv, random_split_cv, cv_set_fraction)
 print(f'\nData split in traint/test with ratio {1-cv_set_fraction}/{cv_set_fraction}')
@@ -153,22 +156,27 @@ x_cv_aug = augment_data(x_cv, multiply_by)
 print('Testing data augmented')
 
 
-filename_save_train = 'train_' + datetime_now + '.csv'
+
+model_code = 'x' + str(multiply_by) + '_' + str(percentage_data_to_use) + '%_' + str(max_rotation_angle) + '_' + str(max_shift_pixels)+ '_' + str(max_scalling_factor) + '_'+ str(cv_set_fraction) 
+
+filename_save_train = 'train_' + model_code + '.csv'
 print(f'\nSaving {filename_save_train} in progress (could take some time)')
 x_train_aug.to_csv(os.path.join(data_dir,filename_save_train), float_format='%.0f', index=False)
 
-filename_save_cv = 'train_' + datetime_now + '_cv.csv'
+filename_save_cv = 'train_' + model_code + '_cv.csv'
 print(f'\nSaving {filename_save_cv} in progress (could take some time)')
 x_cv_aug.to_csv(os.path.join(data_dir,filename_save_cv), float_format='%.0f', index=False)
 
-filename_save_txt = 'train_' + datetime_now + '_details.txt'
+filename_save_txt = 'train_' + model_code + '_details.txt'
 with open(os.path.join(data_dir,filename_save_txt), 'w') as notepad_file:
 	notepad_file.write(f'Data augmented on {datetime.now()}')
 	
-	notepad_file.write(f'\n\nThe data has been split in train/cv, where cv is {cv_set_fraction*100}% of the data.')
-	notepad_file.write(f'\n\nAfterwards, both sets have been augmented x{multiply_by} with the same parameters:')
-	notepad_file.write(f'\n - Max rotation angle is {max_rotation_angle}')
-	notepad_file.write(f'\n - Max scaling factor is {max_scalling_factor}')
-	notepad_file.write(f'\n - Max shift (vertical and horizontal) is {max_shift_pixels}')
+	notepad_file.write(f'\n- We kept {percentage_data_to_use}% of the starting data.')
+	notepad_file.write(f'\n- The data has been split in train/cv, where cv is {cv_set_fraction*100}% of the data.')
+	if multiply_by != 1:
+		notepad_file.write(f'\n- Both sets have been augmented by a factor of x{multiply_by} with the same parameters:')
+		notepad_file.write(f'\n  - Max rotation angle is {max_rotation_angle}')
+		notepad_file.write(f'\n  - Max scaling factor is {max_scalling_factor}')
+		notepad_file.write(f'\n  - Max shift (vertical and horizontal) is {max_shift_pixels}')
 
 visualize_samples(nbr_samples_to_visualize, x_train_aug)
