@@ -1,0 +1,10 @@
+Naming Code
+
+S R L.1 L.25 T activation
+std image std
+XI HI NI weight init
+bn batch norm
+b16 b32 b64 b128 batch size
+fcL.05 cnnL.05 L2Reg
+d.5 Dropout
+sgd.1 adam optimizer

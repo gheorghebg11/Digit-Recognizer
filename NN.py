@@ -31,34 +31,14 @@ nbr_neurons = []
 
 datetime_now = str(datetime.now()).replace('-','').replace(':','').replace(' ','')
 datetime_now = datetime_now[:datetime_now.find('.')]
+datetime_now = datetime_now[4:-2]
 
 ########## Paths
 load_model = False
 loaded_model_name = 'model_20190210215510'
-train_data_name = 'train_x1_100%_0_0_1.0_0.2'
+train_data_name = 'train_x3_100%_10_2_1.1_cv.15'
 
-# Dir (Shouldn't need to be changed)
-if load_model:
-	save_dir = os.path.join(os.getcwd(), 'loaded_' + loaded_model_name + '_' + datetime_now)
-else:
-	save_dir = os.path.join(os.getcwd(), 'model_' + datetime_now)
-os.mkdir(save_dir)
-load_model_dir = os.path.join(os.getcwd(), loaded_model_name)
-data_dir = os.path.join(os.getcwd(), 'data')
-external_pics_dir = os.path.join(os.getcwd(), 'extra_pics')
-
-# Path (Shouldn't need to be changed)
-train_data_path = os.path.join(data_dir, train_data_name + '.csv')
-train_cv_data_path = os.path.join(data_dir, train_data_name +'_cv.csv')
-load_model_path = os.path.join(load_model_dir, 'model.ckpt')
-filename_save_model_archi = os.path.join(save_dir, 'model_details.txt')
-filename_save_path = os.path.join(save_dir, 'model.ckpt')
-tensorboard_path = os.path.join(save_dir)
-filters_layer_0_savepath = os.path.join(save_dir, 'filters.png')
-filter_evolution_savepath = os.path.join(save_dir, 'filter_evolution.png')
-cross_ent_savepath= os.path.join(save_dir, 'cross_entropy_and_acc.png')
-cross_ent_train_savepath = os.path.join(save_dir, 'cross_entropy_train.png')
-cross_ent_cv_savepath = os.path.join(save_dir, 'cross_entropy_cv.png')
+data_aug_coeff = int(train_data_name.split('_')[1][1:])
 
 ########## Some Global var for Training/Testing
 use_tboard = True
@@ -66,9 +46,9 @@ use_tboard = True
 # Training Steps
 nbr_training_steps =  10000
 use_epochs_instead_of_it = True
-nbr_epochs = 100
-ask_for_more_training_epoch_min = 1    # only ask after xx epochs
-ask_for_more_training_epoch_freq = 5 # ask every xx epochs (after min number)
+nbr_epochs = 250
+ask_for_more_training_epoch_min = 50    # only ask after xx epochs
+ask_for_more_training_epoch_freq = 2 # ask every xx epochs (after min number)
 
 # Prediction
 predict_from_external_pics = False
@@ -103,17 +83,17 @@ freq_plot_filter_evolution = freq_calc_acc * 20
 ########## Some Variables for the Architecture
 # Initialization weights
 use_Xavier_init = False
-use_He_init = False # if both are true, He takes priority, if None use normal dist (mean=0,std=0.1)
+use_He_init = True # if both are true, He takes priority, if None use normal dist (mean=0,std=0.1)
 
 # Activation
-activation_choices = ['ReLU', 'LReLU', 'tanh', 'sigmoid']
+activation_choices = ['sigmoid', 'ReLU', 'LReLU', 'tanh']
 activ = 'ReLU'
-activ_lrelu_alpha = 0.01
+activ_lrelu_alpha = 0.1
 
 # Normalization
-use_input_mean = False
-use_input_std = False
-use_batch_normalization = False
+use_input_mean = True
+use_input_std = True
+use_batch_normalization = True
 
 # Batch
 batch_size = 128 # in [16,32, 64, 128, 256]
@@ -121,23 +101,25 @@ shuffle_dataset_every_epoch = True
 
 # L2-Regularization
 use_L2reg_in_conv = False
-use_L2reg_in_full = False
+use_L2reg_in_full = True
 beta = 0.05 # reg variable [0.01, 0.1]
 
 # Dropout
-keep_prob_training = 1.0 #dropout variable, set to 1 to ignore dropout, only on FC-layers
+keep_prob_training = 0.8 #dropout variable, set to 1 to ignore dropout, only on FC-layers
 
 # Optimizer
 choices_gd = ['SGD', 'Adam']
-optimizer_gd = 'SGD'
+optimizer_gd = 'Adam'
 learning_rate = 0.1
 
 # The convolution layers (nbr of filters, filter size, (v_stride,h_stride), 2x2maxpool)
-fil_size_stride_pool.append([32, [3,3], [1,1], True])
-fil_size_stride_pool.append([64, [3,3], [1,1], True])
+fil_size_stride_pool.append([128, [3,3], [1,1], False])
+fil_size_stride_pool.append([64, [3,3], [1,1], False])
+fil_size_stride_pool.append([32, [3,3], [1,1], False])
 
 # The full layers (nbr neurons)
-nbr_neurons.append(16)
+nbr_neurons.append(256)
+nbr_neurons.append(128)
 nbr_neurons.append(nbr_classes)
 
 # CV
@@ -147,6 +129,55 @@ freq_eval_cv = freq_calc_acc *5
 freq_print_cv = freq_eval_cv * 0
 freq_plot_cv = freq_eval_cv * 5
 freq_print_cv_info_per_cv_calculation = 0
+
+####################################################
+# Dir (Shouldn't need to be changed)
+if load_model:
+	save_dir = os.path.join(os.getcwd(), 'loaded_' + loaded_model_name + '_' + datetime_now)
+else:
+	model_name = activ[0]
+	if activ == 'LReLU':
+		model_name += str(activ_lrelu_alpha)[1:]
+	if use_input_mean == True:
+		model_name += '_std'
+	if use_He_init:
+		model_name += '_HI'
+	elif use_Xavier_init:
+		model_name += '_XI'
+	if use_batch_normalization:
+		model_name += '_bn'
+	model_name += '_b' + str(batch_size)
+	if use_L2reg_in_conv:
+		model_name += '_cnnL' + str(beta)[1:]
+	if use_L2reg_in_full:
+		model_name += '_fcL' + str(beta)[1:]
+	if keep_prob_training != 1.0:
+		model_name += '_d' + str(keep_prob_training)[1:]
+	if optimizer_gd == 'SGD':
+		model_name += '_sgd' + str(learning_rate)[1:]
+	elif optimizer_gd == 'Adam':
+		model_name += '_adam'
+	model_name += '_' + datetime_now
+	save_dir = os.path.join(os.getcwd(), 'model_' + model_name)
+os.mkdir(save_dir)
+load_model_dir = os.path.join(os.getcwd(), loaded_model_name)
+data_dir = os.path.join(os.getcwd(), 'data')
+external_pics_dir = os.path.join(os.getcwd(), 'extra_pics')
+
+# Path (Shouldn't need to be changed)
+train_data_path = os.path.join(data_dir, train_data_name + '.csv')
+train_cv_data_path = os.path.join(data_dir, train_data_name +'_cv.csv')
+load_model_path = os.path.join(load_model_dir, 'model.ckpt')
+filename_save_model_archi = os.path.join(save_dir, 'model_details.txt')
+filename_save_path = os.path.join(save_dir, 'model.ckpt')
+tensorboard_path = os.path.join(save_dir)
+filters_layer_0_savepath = os.path.join(save_dir, 'filters.png')
+filter_evolution_savepath = os.path.join(save_dir, 'filter_evolution.png')
+cross_ent_savepath= os.path.join(save_dir, 'cross_entropy_and_acc.png')
+cross_ent_train_savepath = os.path.join(save_dir, 'cross_entropy_train.png')
+cross_ent_cv_savepath = os.path.join(save_dir, 'cross_entropy_cv.png')
+
+print(f'The model name is model_{model_name}')
 
 #####################################################
 ##### Step 2 - Process Data
@@ -247,9 +278,10 @@ def weight_variable(shape, use_reg, fan_in):
 		stddev = math.sqrt(2.0 / fan_in)
 	elif use_Xavier_init:
 		stddev = 1.0 / fan_in
+		
 	else:
 		stddev = 0.1
-
+		
 	initial = tf.truncated_normal(shape, stddev = stddev, name='weight_init')
 
 	regularizer = None
@@ -457,7 +489,7 @@ def plot_filters(iteration_step, nbr_conv_layer=0, nbr_filters=None, save = Fals
 		fig.suptitle(f'Printing {nbr_filters} filters of size {filters_size} from the conv layer {nbr_conv_layer} (after {iteration_step} steps)', va='top', fontsize=16)
 
 		if save:
-			plt.savefig(fname = filters_layer_0_savepath)
+			plt.savefig(fname = filters_layer_0_savepath, bbox_inches="tight")
 			plt.close() # close it so it doesn't print at the end
 			print(f'\nSaved {nbr_filters} filters of size {filters_size} from the conv layer {nbr_conv_layer}')
 		else:
@@ -481,7 +513,7 @@ def plot_filter_evolution(iteration_step, filter_layer=0, filter_nbr=0, save = F
 	#fig.suptitle(f'The evolution of filter {filter_nbr} in layer {filter_layer} over {len(filter_history)} periods of time ({iteration_step} iterations each)', va='top', fontsize=16) #, y=0.92+ math.exp(-nbr_rows)
 
 	if save and len(filter_history) != 0:
-		plt.savefig(fname = filter_evolution_savepath)
+		plt.savefig(fname = filter_evolution_savepath, bbox_inches="tight")
 		plt.close() # close it so it doesn't print at the end
 		print(f'\nSaved the evolution of filter {filter_nbr} in layer {filter_layer} over {len(filter_history)} periods of time ({int(iteration_step / len(filter_history))} iterations each)')
 	else:
@@ -508,7 +540,7 @@ def plot_cross_ent_and_acc(cross_ent, acc, it, dataset_type='Training', cross_en
 	ax2.set_ylabel(dataset_type + ' accuracy', color=color)  # we already handled the x-label with ax1
 	ax2.plot(x_axis, acc, color=color, label =f'{dataset_type} accuracy')
 	ax2.tick_params(axis='y', labelcolor=color)
-	plt.ylim(bottom=0.85, top = 1.01)
+	plt.ylim(bottom=0.92, top = 1.01)
 	
 	fig.tight_layout()  # otherwise the right y-label is slightly clipped
 	plt.title(f'{dataset_type} cross-entropy and accuracy after {it+1} iterations (epoch {epoch:2.2f}) of training')
@@ -526,10 +558,10 @@ def plot_cross_ent_and_acc(cross_ent, acc, it, dataset_type='Training', cross_en
 		lines, labels = ax1.get_legend_handles_labels()
 		lines2, labels2 = ax2.get_legend_handles_labels()
 		ax2.legend(lines + lines2, labels + labels2, loc='lower left')
-		plt.title(f'Cross-entropy and accuracy after {it+1} iterations (epoch {epoch:2.2f}) of training')
+		plt.title(f'Cross-entropy and accuracy after {it+1} iterations (epoch {epoch:2.2f}) of training', y = 0.5)
 
 	if savepath != None:
-		plt.savefig(fname = savepath)
+		plt.savefig(fname = savepath, bbox_inches="tight")
 		if cross_ent_2 != None:
 			print(f'\nSaved graph for cross-entropy and accuracy')
 		else:
@@ -542,14 +574,16 @@ def plot_cross_ent_and_acc(cross_ent, acc, it, dataset_type='Training', cross_en
 ############ Saving Stuff
 def save_model_details():
 	with open(filename_save_model_archi, 'w') as notepad_file:
-		notepad_file.write(f'Model from {datetime.now()}, trained for ({epoch:2.1f} epochs), which took {(end_time - start_time) / 60:3.1f} minutes.')
+		
+		notepad_file.write(f'Model from {datetime.now()}, trained for {epoch:2.1f} epochs (x{data_aug_coeff} = {epoch*data_aug_coeff:2.1f} adjusted epochs by data augmentation), which took {total_time:3.1f} minutes.')
+		notepad_file.write(f'\nModel codename is {model_name}.')
 		
 		notepad_file.write(f'\n\nData : we used the data from the file {train_data_name}, here are its characteristics:\n')
 		with open(os.path.join(data_dir, train_data_name + '_details.txt'), 'r') as data_details_file: 
 			notepad_file.write(data_details_file.read())
 		
 		if use_input_mean:
-			notepad_file.write(f'\nWe used data standardization by removing the mean (centering)')
+			notepad_file.write(f'\n- We used data standardization by removing the mean (centering)')
 		if use_input_std:
 			notepad_file.write(f'and diving by the standard deviation')
 		notepad_file.write(f'\n\nInitialization: the weights of the NN were initialized ')
@@ -601,7 +635,8 @@ def ask_for_more_training(epoch):
 			plot_filters(i+1, nbr_filters=nbr_filters_layer_0)
 			plot_filter_evolution(i+1)
 			plot_cross_ent_and_acc(cross_ent_history_train, accuracy_history_train, i, cross_ent_2 = cross_ent_history_cv, acc_2 = accuracy_history_cv)
-
+			plot_cross_ent_and_acc(cross_ent_history_cv, accuracy_history_cv, i, dataset_type = 'CV')
+			
 # =============================================================================
 # 			plot_cross_ent_and_acc(cross_ent_history_train, accuracy_history_train, i)
 # 			plot_cross_ent_and_acc(cross_ent_history_cv, accuracy_history_cv, i, dataset_type='CV')
@@ -807,6 +842,7 @@ with tf.Session() as sess:
 		accuracy_history_cv = []
 		
 		start_time = time.time()
+		total_time = 0
 		
 		# TRAINING
 		for i in range(nbr_training_steps):
@@ -814,10 +850,14 @@ with tf.Session() as sess:
 
 			# If we arrive at the end of an epoch: Shuffle + ask for more
 			if (i*batch_size % nbr_training_ex) < batch_size and shuffle_dataset_every_epoch:
+				
+				total_time = total_time + (time.time() - start_time) / 60 # pause time
 				# Ask for more training
 				if ask_for_more_training(epoch) == False:
+					start_time = time.time() #resume time (if exit)
 					break
-
+				start_time = time.time() # resume time (if continue)
+				
 				# Shuffle
 				x_train,y_train = shuffle_dataset(x_train,y_train)
 				print(f'\nBeginning of epoch {int(epoch)}, data set shuffled')
@@ -876,7 +916,7 @@ with tf.Session() as sess:
 				if freq_plot_cv != 0 and (i+1) % freq_plot_cv == 0:
 					plot_cross_ent_and_acc(cross_ent_history_train, accuracy_history_train, i, cross_ent_2 = cross_ent_history_cv, acc_2 = accuracy_history_cv)
 
-		end_time = time.time()
+		total_time = total_time + (time.time() - start_time) / 60
 
 		# END OF TRAINING
 		print(f'\n--------------------------------------------------------\nTraining finished after {epoch:2.2f} epochs and {nbr_training_steps} training steps.\n--------------------------------------------------------')
@@ -940,6 +980,7 @@ with tf.Session() as sess:
 # check test set done multiple times (maybe do first time without transform ?)
 # check neuron activation, norm of gradient, etc
 # increase batch size as epoch number gets bigger
+# Batch Norm VS manual std for input layer. Manual should be better as it uses all data, not just a batch.
 	
 # fix bugs with enter answer IO of python...	
 # add identity shortcuts

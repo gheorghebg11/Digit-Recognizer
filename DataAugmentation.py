@@ -34,11 +34,11 @@ data_path = 'train'
 
 ########## Some Variables for the Architecture
 # Data augmentation
-multiply_by = 1 #by a factor of how much we augment the amount of data
+multiply_by = 3 #by a factor of how much we augment the amount of data
 
-max_rotation_angle = 20
-max_scalling_factor = 1.2
-max_shift_pixels = 3
+max_rotation_angle = 10
+max_scalling_factor = 1.1
+max_shift_pixels = 2
 
 # Use all of the data ?
 percentage_data_to_use = 100
@@ -46,7 +46,7 @@ percentage_data_to_use = 100
 ##### CV
 batch_size_cv = 128 # this is for the NN, ensuring that the # of CV examples is a multiple of batch_size_cv
 random_split_cv = True
-cv_set_fraction = 0.2
+cv_set_fraction = 0.15
 
 # Visualization
 nbr_samples_to_visualize = 5
@@ -145,7 +145,7 @@ nbr_ex = int(percentage_data_to_use * x_csv.shape[0] / 100)
 x_csv = x_csv.iloc[:nbr_ex]
 
 x_train, x_cv = split_train_test(x_csv, random_split_cv, cv_set_fraction)
-print(f'\nData split in traint/test with ratio {1-cv_set_fraction}/{cv_set_fraction}')
+print(f'\nData split in traint/test with ratio {1-cv_set_fraction}/{cv_set_fraction}, and so {(1-cv_set_fraction)*nbr_ex}/{cv_set_fraction*nbr_ex}')
 
 print(f'\nAugmenting the training data:')
 x_train_aug = augment_data(x_train, multiply_by)
@@ -157,7 +157,7 @@ print('Testing data augmented')
 
 
 
-model_code = 'x' + str(multiply_by) + '_' + str(percentage_data_to_use) + '%_' + str(max_rotation_angle) + '_' + str(max_shift_pixels)+ '_' + str(max_scalling_factor) + '_'+ str(cv_set_fraction) 
+model_code = 'x' + str(multiply_by) + '_' + str(percentage_data_to_use) + '%_' + str(max_rotation_angle) + '_' + str(max_shift_pixels)+ '_' + str(max_scalling_factor) + '_cv.'+ str(cv_set_fraction)[1:] 
 
 filename_save_train = 'train_' + model_code + '.csv'
 print(f'\nSaving {filename_save_train} in progress (could take some time)')

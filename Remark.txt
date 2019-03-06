@@ -1,0 +1,3 @@
+- Are the filters a little different with and witout regularization ? You would guess that because of L2reg, the weights would be a little smaller and thus the filters darker. In the only example for model1 the filters are way more polarized black/white, and not just darker.... Keep experimenting.
+
+- For image STD try to only remove the mean, as the values are already between 0 and 1. This will make it 0 centered, with std dev small. I think it explodes if we divide by std.....
