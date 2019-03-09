@@ -36,7 +36,7 @@ datetime_now = datetime_now[4:-2]
 ########## Paths
 load_model = False
 loaded_model_name = 'model_20190210215510'
-train_data_name = 'train_x3_100%_10_2_1.1_cv.15'
+train_data_name = 'train_x5_100%_7_2_1.1_cv..05'
 
 data_aug_coeff = int(train_data_name.split('_')[1][1:])
 
@@ -47,8 +47,8 @@ use_tboard = True
 nbr_training_steps =  10000
 use_epochs_instead_of_it = True
 nbr_epochs = 250
-ask_for_more_training_epoch_min = 50    # only ask after xx epochs
-ask_for_more_training_epoch_freq = 2 # ask every xx epochs (after min number)
+ask_for_more_training_epoch_min = 8    # only ask after xx epochs
+ask_for_more_training_epoch_freq = 1 # ask every xx epochs (after min number)
 
 # Prediction
 predict_from_external_pics = False
@@ -96,7 +96,7 @@ use_input_std = True
 use_batch_normalization = True
 
 # Batch
-batch_size = 128 # in [16,32, 64, 128, 256]
+batch_size = 64 # in [16,32, 64, 128, 256]
 shuffle_dataset_every_epoch = True
 
 # L2-Regularization
@@ -105,7 +105,7 @@ use_L2reg_in_full = True
 beta = 0.05 # reg variable [0.01, 0.1]
 
 # Dropout
-keep_prob_training = 0.8 #dropout variable, set to 1 to ignore dropout, only on FC-layers
+keep_prob_training = 0.9 #dropout variable, set to 1 to ignore dropout, only on FC-layers
 
 # Optimizer
 choices_gd = ['SGD', 'Adam']
@@ -113,9 +113,9 @@ optimizer_gd = 'Adam'
 learning_rate = 0.1
 
 # The convolution layers (nbr of filters, filter size, (v_stride,h_stride), 2x2maxpool)
+fil_size_stride_pool.append([32, [3,3], [1,1], True])
+fil_size_stride_pool.append([64, [3,3], [1,1], True])
 fil_size_stride_pool.append([128, [3,3], [1,1], False])
-fil_size_stride_pool.append([64, [3,3], [1,1], False])
-fil_size_stride_pool.append([32, [3,3], [1,1], False])
 
 # The full layers (nbr neurons)
 nbr_neurons.append(256)
@@ -425,6 +425,7 @@ def predict_on_test_set():
 		y_submission.rename(columns={'Label1': 'Label'}, inplace=True)
 		
 	# Save the prediction
+	y_submission['Label'] = y_submission['Label'].astype(np.int)
 	y_submission[['ImageId', 'Label']].to_csv(os.path.join(save_dir,f'submission_epoch{int(epoch)}.csv'), index=False)
 	print('Testing Done and saved')
 

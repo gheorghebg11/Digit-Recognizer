@@ -34,9 +34,9 @@ data_path = 'train'
 
 ########## Some Variables for the Architecture
 # Data augmentation
-multiply_by = 3 #by a factor of how much we augment the amount of data
+multiply_by = 5 #by a factor of how much we augment the amount of data
 
-max_rotation_angle = 10
+max_rotation_angle = 7
 max_scalling_factor = 1.1
 max_shift_pixels = 2
 
@@ -46,7 +46,7 @@ percentage_data_to_use = 100
 ##### CV
 batch_size_cv = 128 # this is for the NN, ensuring that the # of CV examples is a multiple of batch_size_cv
 random_split_cv = True
-cv_set_fraction = 0.15
+cv_set_fraction = 0.05
 
 # Visualization
 nbr_samples_to_visualize = 5
